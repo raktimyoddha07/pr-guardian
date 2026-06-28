@@ -145,6 +145,9 @@ export const api = {
   async deleteAgent(id: number): Promise<void> {
     await request<void>(`/api/agents/${id}`, { method: "DELETE" });
   },
+  async syncAgent(id: number): Promise<Agent> {
+    return request<Agent>(`/api/agents/${id}/sync`, { method: "POST" });
+  },
 
   // ------------------------------------------------------------- events
   async listEvents(params: {

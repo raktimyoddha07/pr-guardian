@@ -17,7 +17,13 @@ from alembic import context
 from app.core.config import settings
 from app.core.database import Base
 # Import models so they register on Base.metadata before autogenerate runs.
-from app.models import Agent, GithubAccount, PREvent, User  # noqa: F401
+from app.models import (  # noqa: F401
+    Agent,
+    GithubAccount,
+    KnowledgeChunk,
+    PREvent,
+    User,
+)
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)

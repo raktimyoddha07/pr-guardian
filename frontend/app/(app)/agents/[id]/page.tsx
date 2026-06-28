@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,24 @@ export default function AgentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toggling, setToggling] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const loadAgent = useCallback(async () => {
+    try {
+      const a = await api.getAgent(agentId);
+      setAgent(a);
+      // Stop polling when ingestion settles.
+      if (a.ingestion_status === "done" || a.ingestion_status === "failed") {
+        if (pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to load agent");
+    }
+  }, [agentId]);
 
   async function load() {
     try {
@@ -35,6 +53,13 @@ export default function AgentDetailPage() {
       ]);
       setAgent(a);
       setEvents(evs);
+      // If ingestion is running, start polling.
+      if (
+        a.ingestion_status === "running" ||
+        a.ingestion_status === "pending"
+      ) {
+        pollRef.current = setInterval(() => void loadAgent(), 3000);
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to load agent");
     } finally {
@@ -44,6 +69,9 @@ export default function AgentDetailPage() {
 
   useEffect(() => {
     void load();
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId]);
 
@@ -75,6 +103,24 @@ export default function AgentDetailPage() {
     }
   }
 
+  async function handleSync() {
+    if (!agent) return;
+    setSyncing(true);
+    try {
+      const updated = await api.syncAgent(agent.id);
+      setAgent(updated);
+      // Start polling for ingestion progress.
+      if (updated.ingestion_status === "running" || updated.ingestion_status === "pending") {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = setInterval(() => void loadAgent(), 3000);
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to sync");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   if (loading) return <p className="text-muted-foreground">Loading…</p>;
   if (error && !agent) {
     return (
@@ -84,6 +130,9 @@ export default function AgentDetailPage() {
     );
   }
   if (!agent) return null;
+
+  const ingestionRunning =
+    agent.ingestion_status === "running" || agent.ingestion_status === "pending";
 
   return (
     <div className="space-y-6">
@@ -109,6 +158,13 @@ export default function AgentDetailPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleSync}
+            disabled={syncing || ingestionRunning}
+          >
+            {syncing || ingestionRunning ? "Syncing…" : "Re-sync Knowledge Base"}
+          </Button>
           <Button
             variant="outline"
             onClick={handleToggle}
@@ -139,18 +195,21 @@ export default function AgentDetailPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Vector DB</CardDescription>
-            <CardTitle className="text-base capitalize">
-              {agent.vector_db_type}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Ingestion</CardDescription>
-            <CardTitle className="text-base capitalize">
-              {agent.ingestion_status}
-            </CardTitle>
+            <CardDescription>Ingestion status</CardDescription>
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-base capitalize">
+                {agent.ingestion_status}
+              </CardTitle>
+              {ingestionRunning && (
+                <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
+              )}
+            </div>
+            {agent.last_ingested_at && (
+              <p className="text-xs text-muted-foreground">
+                Last synced{" "}
+                {new Date(agent.last_ingested_at).toLocaleString()}
+              </p>
+            )}
           </CardHeader>
         </Card>
         <Card>
@@ -159,21 +218,27 @@ export default function AgentDetailPage() {
             <CardTitle className="text-base">{agent.chunk_count}</CardTitle>
           </CardHeader>
         </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Total events</CardDescription>
+            <CardTitle className="text-base">{events.length}</CardTitle>
+          </CardHeader>
+        </Card>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>PR events</CardTitle>
           <CardDescription>
-            Webhook events received for this agent. Real pipeline decisions land
-            here in Phase 3.
+            Pipeline decisions for this agent. Each PR runs through spam →
+            malicious code → hijack-proof → summary layers.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {events.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No events yet. Install the GitHub App and open a PR to see webhook
-              events arrive here.
+              No events yet. Install the GitHub App and open a PR on the
+              connected repo.
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -208,7 +273,9 @@ export default function AgentDetailPage() {
                       <td className="py-2 pr-4">
                         <Badge
                           variant={
-                            ev.decision === "approved" ? "success" : "destructive"
+                            ev.decision === "approved"
+                              ? "success"
+                              : "destructive"
                           }
                         >
                           {ev.decision}

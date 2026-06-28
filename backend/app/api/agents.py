@@ -1,14 +1,19 @@
-"""Agent CRUD endpoints: create, list, get, update, delete.
+"""Agent CRUD endpoints: create, list, get, update, delete, sync.
 
 Ownership is enforced: every query scopes agents to the current user.
 """
-from fastapi import APIRouter, HTTPException, status
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DBSession
 from app.models.agent import Agent
 from app.schemas.agent import AgentCreate, AgentRead, AgentUpdate
+from app.services.ingestion import ingest_agent
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
@@ -25,7 +30,10 @@ async def list_agents(current_user: CurrentUser, db: DBSession) -> list[Agent]:
 
 @router.post("", response_model=AgentRead, status_code=status.HTTP_201_CREATED)
 async def create_agent(
-    payload: AgentCreate, current_user: CurrentUser, db: DBSession
+    payload: AgentCreate,
+    current_user: CurrentUser,
+    db: DBSession,
+    background_tasks: BackgroundTasks,
 ) -> Agent:
     agent = Agent(
         user_id=current_user.id,
@@ -46,7 +54,18 @@ async def create_agent(
             detail="Could not create agent (invalid input)",
         ) from exc
     await db.refresh(agent)
+
+    # Kick off ingestion in the background; status is tracked on the agent row.
+    background_tasks.add_task(_run_ingestion, agent.id)
     return agent
+
+
+async def _run_ingestion(agent_id: int) -> None:
+    """Background wrapper that logs but never raises into the response cycle."""
+    try:
+        await ingest_agent(agent_id)
+    except Exception:  # noqa: BLE001 — status is recorded inside ingest_agent
+        logger.exception("agent %s: background ingestion failed", agent_id)
 
 
 async def _get_owned_or_404(db: DBSession, agent_id: int, user_id: int) -> Agent:
@@ -89,3 +108,18 @@ async def delete_agent(
     agent = await _get_owned_or_404(db, agent_id, current_user.id)
     await db.delete(agent)
     await db.commit()
+
+
+@router.post("/{agent_id}/sync", response_model=AgentRead)
+async def sync_agent(
+    agent_id: int,
+    current_user: CurrentUser,
+    db: DBSession,
+    background_tasks: BackgroundTasks,
+) -> Agent:
+    """Trigger a manual re-ingestion of the agent's knowledge base."""
+    agent = await _get_owned_or_404(db, agent_id, current_user.id)
+    background_tasks.add_task(_run_ingestion, agent.id)
+    # Re-read fresh status without blocking.
+    await db.refresh(agent)
+    return agent
