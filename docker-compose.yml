@@ -1,0 +1,49 @@
+# PR Guardian local infrastructure.
+#
+# `docker compose up -d` brings up Postgres (with pgvector) and ChromaDB/Ollama
+# as optional helpers. The backend and frontend run directly with uvicorn /
+# next dev during development — see AGENTS.md "Running Locally".
+#
+# Phase 5 will add the backend + frontend services here with multi-stage
+# Dockerfiles and a real task queue.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: prguardian-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: prguardian
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d prguardian"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: prguardian-chromadb
+    ports:
+      - "8001:8000"
+    volumes:
+      - chromadata:/chroma/chroma
+    profiles: ["chromadb"]   # opt-in: `docker compose --profile chromadb up`
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: prguardian-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollamadata:/root/.ollama
+    profiles: ["ollama"]     # opt-in: pull a model with `docker exec ... ollama pull llama3`
+
+volumes:
+  pgdata:
+  chromadata:
+  ollamadata:
