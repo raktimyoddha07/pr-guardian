@@ -1,0 +1,166 @@
+"""LLM + embedding abstraction.
+
+Per AGENTS.md every node and service calls ``get_embedding`` /
+``get_llm_response`` — never the provider APIs directly. ``LLM_PROVIDER`` in
+settings picks the backend, but per-agent config (``Agent.llm_provider``) can
+override it at call time.
+
+Both Ollama and Gemini are spoken to over plain REST (httpx), so we don't drag
+in heavy SDKs.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any, Literal
+
+import httpx
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+Provider = Literal["ollama", "gemini"]
+
+
+# --------------------------------------------------------------------------- chat
+
+
+async def _ollama_chat(
+    prompt: str, system: str, model: str, *, temperature: float
+) -> str:
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(
+            f"{settings.OLLAMA_BASE_URL}/api/chat",
+            json={
+                "model": model,
+                "stream": False,
+                "options": {"temperature": temperature},
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()["message"]["content"].strip()
+
+
+async def _gemini_chat(
+    prompt: str, system: str, model: str, *, temperature: float
+) -> str:
+    if not settings.GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY is required for the gemini provider")
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model}:generateContent?key={settings.GEMINI_API_KEY}",
+            json={
+                "systemInstruction": {"parts": [{"text": system}]} if system else None,
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": temperature},
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+
+async def get_llm_response(
+    prompt: str,
+    system: str = "",
+    *,
+    provider: Provider | None = None,
+    model: str | None = None,
+    temperature: float = 0.2,
+) -> str:
+    """Return the model's text response for ``prompt``.
+
+    Args:
+        prompt: The user message (PR content wrapped in XML delimiters upstream).
+        system: Injection-resistant system prompt.
+        provider: Override the default provider; defaults to settings.
+        model: Override the default model for the chosen provider.
+        temperature: 0.0–1.0; default 0.2 for deterministic decisions.
+    """
+    provider = provider or settings.LLM_PROVIDER  # type: ignore[assignment]
+    model = model or (
+        settings.GEMINI_MODEL if provider == "gemini" else settings.OLLAMA_MODEL
+    )
+
+    try:
+        if provider == "ollama":
+            return await _ollama_chat(prompt, system, model, temperature=temperature)
+        if provider == "gemini":
+            return await _gemini_chat(prompt, system, model, temperature=temperature)
+    except httpx.HTTPError as exc:
+        logger.error("LLM provider %s request failed: %s", provider, exc)
+        raise
+    raise ValueError(f"Unknown LLM provider: {provider!r}")
+
+
+# --------------------------------------------------------------------- embeddings
+
+
+async def _ollama_embed(text: str, model: str) -> list[float]:
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(
+            f"{settings.OLLAMA_BASE_URL}/api/embeddings",
+            json={"model": model, "prompt": text},
+        )
+        resp.raise_for_status()
+        return list(resp.json()["embedding"])
+
+
+async def _gemini_embed(text: str, model: str) -> list[float]:
+    if not settings.GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY is required for the gemini provider")
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model}:embedContent?key={settings.GEMINI_API_KEY}",
+            json={"model": f"models/{model}", "content": {"parts": [{"text": text}]}},
+        )
+        resp.raise_for_status()
+        return list(resp.json()["embedding"]["values"])
+
+
+async def get_embedding(
+    text: str, *, provider: Provider | None = None, model: str | None = None
+) -> list[float]:
+    """Return the embedding vector for ``text``."""
+    provider = provider or settings.LLM_PROVIDER  # type: ignore[assignment]
+    model = model or (
+        settings.GEMINI_EMBED_MODEL
+        if provider == "gemini"
+        else settings.OLLAMA_EMBED_MODEL
+    )
+
+    try:
+        if provider == "ollama":
+            return await _ollama_embed(text, model)
+        if provider == "gemini":
+            return await _gemini_embed(text, model)
+    except httpx.HTTPError as exc:
+        logger.error("Embedding provider %s request failed: %s", provider, exc)
+        raise
+    raise ValueError(f"Unknown LLM provider: {provider!r}")
+
+
+async def embed_batch(
+    texts: list[str], *, provider: Provider | None = None
+) -> list[list[float]]:
+    """Embed multiple texts sequentially (provider rate-limits make this safest).
+
+    Used by ingestion. Batching could be added later but most repos fit fine.
+    """
+    return [await get_embedding(t, provider=provider) for t in texts]
+
+
+# --------------------------------------------------------------------------- helpers
+
+
+def resolve_provider(agent: Any) -> Provider:
+    """Pick the provider for an agent, falling back to the global default."""
+    raw = getattr(agent, "llm_provider", None) or settings.LLM_PROVIDER
+    return raw if raw in ("ollama", "gemini") else settings.LLM_PROVIDER  # type: ignore[return-value]

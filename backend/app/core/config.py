@@ -40,17 +40,43 @@ class Settings(BaseSettings):
     GITHUB_WEBHOOK_SECRET: str = "change-me-webhook-secret"
     GITHUB_TOKEN: str | None = None  # optional PAT fallback for the github client
 
-    # Vector DB
-    VECTOR_DB: Literal["pgvector", "chromadb"] = "pgvector"
-    CHROMADB_HOST: str = "localhost"
-    CHROMADB_PORT: int = 8001
+    # Vector DB — pgvector only (embeddings stored in the KnowledgeChunk table
+    # alongside the rest of the data; no separate service). EMBEDDING_DIM is set
+    # in the LLM section below alongside the embedding model names.
 
     # LLM
     LLM_PROVIDER: Literal["ollama", "gemini"] = "ollama"
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3"
+    OLLAMA_EMBED_MODEL: str = "nomic-embed-text"
     GEMINI_API_KEY: str | None = None
     GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_EMBED_MODEL: str = "text-embedding-004"
+    # Dimensionality of the chosen embedding model. nomic-embed-text = 768,
+    # Gemini text-embedding-004 = 768 (configurable, but default 768). pgvector
+    # stores vectors of exactly this width.
+    EMBEDDING_DIM: int = 768
+
+    # RAG
+    RAG_CHUNK_TOKENS: int = 512
+    RAG_CHUNK_OVERLAP: int = 50
+    RAG_TOP_K: int = 8
+
+    # Ingestion
+    INGESTION_MAX_FILES: int = 5000
+    INGESTION_MAX_FILE_BYTES: int = 512 * 1024  # skip files bigger than 512KB
+    INGESTION_TEXT_EXTS: str = (
+        ".py,.js,.ts,.tsx,.jsx,.go,.rs,.java,.kt,.rb,.php,.c,.cc,.cpp,.h,.hpp,"
+        ".cs,.swift,.m,.mm,.scala,.clj,.ex,.exs,.erl,.hs,.ml,.lua,.pl,.r,.sh,"
+        ".bash,.zsh,.fish,.ps1,.bat,.cmd,.yml,.yaml,.toml,.ini,.cfg,.conf,.json,"
+        ".jsonc,.xml,.html,.css,.scss,.sass,.less,.vue,.svelte,.md,.rst,.txt,"
+        ".sql,.graphql,.gql,.proto,.dockerfile,.env.example,.gitignore,.gitattributes"
+    )
+
+    # Pipeline
+    SPAM_THRESHOLD: float = 0.75
+    FLAG_BAN_THRESHOLD: int = 3
+    MAX_PR_DIFF_BYTES: int = 500 * 1024
 
 
 @lru_cache

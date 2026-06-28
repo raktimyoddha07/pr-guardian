@@ -209,5 +209,96 @@ class GithubClient:
                 )
             return resp.text
 
+    # ------------------------------------------------------ ingestion helpers
+
+    async def get_tree_blobs(
+        self, repo_full_name: str, branch: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return the flat list of blob file entries for a repo.
+
+        Uses the recursive tree endpoint. Each entry has ``path``, ``size``,
+        ``sha``, ``type``. Only ``type == "blob"`` entries are returned.
+        """
+        headers = await self._headers(repo_full_name)
+        ref = branch or (await self.get_repo(repo_full_name)).default_branch or "HEAD"
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            resp = await client.get(
+                f"{GITHUB_API}/repos/{repo_full_name}/git/trees/{ref}?recursive=1",
+                headers=headers,
+            )
+            data = self._check(resp)
+        return [e for e in data.get("tree", []) if e.get("type") == "blob"]
+
+    async def get_blob_content(
+        self, repo_full_name: str, file_sha: str
+    ) -> str:
+        """Fetch the decoded text content of a single file blob."""
+        headers = await self._headers(repo_full_name)
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            resp = await client.get(
+                f"{GITHUB_API}/repos/{repo_full_name}/git/blobs/{file_sha}",
+                headers=headers,
+            )
+            data = self._check(resp)
+        import base64
+
+        content = data.get("content") or ""
+        if data.get("encoding") == "base64":
+            # GitHub base64 may include newlines; normalize before decoding.
+            return base64.b64decode(content.replace("\n", "")).decode(
+                "utf-8", errors="replace"
+            )
+        return content
+
+    async def get_issue_comments(
+        self, repo_full_name: str, issue_number: int
+    ) -> list[dict[str, Any]]:
+        headers = await self._headers(repo_full_name)
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            resp = await client.get(
+                f"{GITHUB_API}/repos/{repo_full_name}/issues/{issue_number}/comments",
+                params={"per_page": 100},
+                headers=headers,
+            )
+            return self._check(resp)
+
+    # ------------------------------------------------- PR write operations
+
+    async def post_pr_comment(
+        self, repo_full_name: str, pr_number: int, body: str
+    ) -> None:
+        headers = await self._headers(repo_full_name)
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            resp = await client.post(
+                f"{GITHUB_API}/repos/{repo_full_name}/issues/{pr_number}/comments",
+                json={"body": body},
+                headers=headers,
+            )
+            self._check(resp)
+
+    async def update_pr(
+        self,
+        repo_full_name: str,
+        pr_number: int,
+        *,
+        title: str | None = None,
+        body: str | None = None,
+    ) -> None:
+        headers = await self._headers(repo_full_name)
+        payload: dict[str, Any] = {}
+        if title is not None:
+            payload["title"] = title
+        if body is not None:
+            payload["body"] = body
+        if not payload:
+            return
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            resp = await client.patch(
+                f"{GITHUB_API}/repos/{repo_full_name}/pulls/{pr_number}",
+                json=payload,
+                headers=headers,
+            )
+            self._check(resp)
+
 
 github_client = GithubClient()
