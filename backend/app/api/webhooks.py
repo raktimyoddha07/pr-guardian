@@ -2,11 +2,8 @@
 
 Validates the ``X-Hub-Signature-256`` header with HMAC-SHA256, then routes
 valid ``pull_request`` events (actions ``opened`` / ``synchronize``) to a
-background task. Per AGENTS.md the webhook must respond within 10 seconds, so
-all pipeline work happens out-of-band.
-
-Phase 1 only logs and records a placeholder event — the real pipeline arrives
-in Phase 3.
+background task that runs the full LangGraph pipeline. Per AGENTS.md the
+webhook must respond within 10 seconds, so all pipeline work happens out-of-band.
 """
 from __future__ import annotations
 
@@ -16,12 +13,9 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
-from sqlalchemy import select
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
-from app.models.agent import Agent
-from app.models.pr_event import PREvent
+from app.pipeline.runner import run_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -47,52 +41,6 @@ def _verify_signature(raw_body: bytes, signature_header: str | None) -> bool:
         digestmod=hashlib.sha256,
     ).hexdigest()
     return hmac.compare_digest(delivered, expected)
-
-
-async def _handle_pr_event(
-    repo_full_name: str,
-    pr_number: int,
-    pr_url: str,
-    pr_action: str,
-    author: str,
-) -> None:
-    """Background handler — looks up the owning agent and records a stub event.
-
-    The actual LangGraph pipeline is wired in Phase 3. For now we just persist
-    a placeholder row so the dashboard has something to render and the event
-    log table is exercised end-to-end.
-    """
-    async with AsyncSessionLocal() as db:
-        agent = await db.scalar(
-            select(Agent)
-            .where(Agent.repo_full_name == repo_full_name)
-            .where(Agent.is_active.is_(True))
-            .order_by(Agent.id.desc())
-            .limit(1)
-        )
-        if agent is None:
-            logger.info("webhook: no agent owns %s, ignoring", repo_full_name)
-            return
-
-        logger.info(
-            "webhook: enqueuing review for PR #%s on %s (action=%s) -> agent %s",
-            pr_number,
-            repo_full_name,
-            pr_action,
-            agent.id,
-        )
-
-        event = PREvent(
-            agent_id=agent.id,
-            pr_number=pr_number,
-            pr_url=pr_url,
-            author_github=author,
-            decision="approved",  # placeholder until the pipeline exists
-            layer_caught=None,
-            reason=f"Phase 1 stub: webhook received action={pr_action}, pipeline pending",
-        )
-        db.add(event)
-        await db.commit()
 
 
 @router.post("/github", status_code=status.HTTP_202_ACCEPTED)
@@ -147,11 +95,10 @@ async def github_webhook(
 
     # 3. Dispatch — do NOT block the webhook response.
     background_tasks.add_task(
-        _handle_pr_event,
+        run_pipeline,
         repo_full_name=repo_full_name,
         pr_number=int(pr_number),
         pr_url=pr_url,
-        pr_action=action,
         author=author,
     )
     return {"status": "accepted", "pr_number": str(pr_number)}

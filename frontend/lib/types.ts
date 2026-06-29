@@ -55,3 +55,34 @@ export interface PREvent {
   reason: string | null;
   created_at: string;
 }
+
+// ----------------------------------------------------------- dashboard ----
+
+export interface DashboardStats {
+  total_prs: number;
+  approved: number;
+  declined: number;
+  errors: number;
+  flagged_accounts: number;
+  banned_accounts: number;
+  approval_rate: number;
+}
+
+export interface AgentStats {
+  agent_id: number;
+  agent_name: string;
+  repo_full_name: string;
+  total_prs: number;
+  approved: number;
+  declined: number;
+  approval_rate: number;
+}
+
+export interface FlaggedAccount {
+  github_username: string;
+  flag_count: number;
+  account_status: string;
+  banned_at: string | null;
+  first_seen: string;
+  updated_at: string;
+}

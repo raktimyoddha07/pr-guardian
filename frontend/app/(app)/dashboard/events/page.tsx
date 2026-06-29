@@ -41,7 +41,7 @@ export default function EventsPage() {
         <CardHeader>
           <CardTitle>Event log</CardTitle>
           <CardDescription>
-            Most recent first. Real pipeline decisions arrive in Phase 3.
+            Immutable record of every PR decision. Most recent first.
           </CardDescription>
         </CardHeader>
         <CardContent>

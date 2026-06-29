@@ -21,3 +21,6 @@ cryptography>=44.0.0     # GitHub App JWT signing
 # --- Config ---
 pydantic>=2.11
 pydantic-settings>=2.9
+
+# --- Orchestration (LangGraph pipeline) ---
+langgraph>=0.2.60

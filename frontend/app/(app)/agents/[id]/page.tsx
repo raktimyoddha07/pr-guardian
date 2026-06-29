@@ -172,6 +172,9 @@ export default function AgentDetailPage() {
           >
             {agent.is_active ? "Pause" : "Resume"}
           </Button>
+          <Button asChild variant="outline">
+            <Link href={`/agents/${agent.id}/settings`}>Settings</Link>
+          </Button>
           <Button variant="destructive" onClick={handleDelete}>
             Delete
           </Button>

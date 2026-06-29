@@ -12,6 +12,9 @@
 import type {
   Agent,
   AgentCreateInput,
+  AgentStats,
+  DashboardStats,
+  FlaggedAccount,
   PREvent,
   Token,
   User,
@@ -157,5 +160,20 @@ export const api = {
     offset?: number;
   } = {}): Promise<PREvent[]> {
     return request<PREvent[]>("/api/events", { query: params });
+  },
+
+  // ----------------------------------------------------------- dashboard
+  async getStats(agentId?: number): Promise<DashboardStats> {
+    return request<DashboardStats>("/api/dashboard/stats", {
+      query: agentId !== undefined ? { agent_id: agentId } : undefined,
+    });
+  },
+  async getPerAgentStats(): Promise<AgentStats[]> {
+    return request<AgentStats[]>("/api/dashboard/per-agent");
+  },
+  async listFlaggedAccounts(agentId?: number): Promise<FlaggedAccount[]> {
+    return request<FlaggedAccount[]>("/api/dashboard/flagged-accounts", {
+      query: agentId !== undefined ? { agent_id: agentId } : undefined,
+    });
   },
 };
