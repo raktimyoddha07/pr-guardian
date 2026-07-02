@@ -1,151 +1,346 @@
-# PR Guardian — RAG-Powered Agentic PR Manager
+# PR Guardian
 
-PR Guardian automatically reviews GitHub Pull Requests through a multi-layer AI pipeline. Create agents tied to GitHub repos, and every incoming PR is scanned for spam, malicious code, and prompt-injection attempts before being approved or declined.
+> Your AI-powered Pull Request bouncer — catches spam, malicious code, and injection attacks before they reach human reviewers.
 
-## Architecture
+PR Guardian is a RAG-powered GitHub Pull Request management system. Users create agents tied to GitHub repositories. Each agent ingests the full repo and its issues as a knowledge base, then autonomously reviews incoming PRs through a multi-layer agentic pipeline — declining dangerous PRs and polishing clean ones before they ever reach a human reviewer.
 
+## 🚀 How to Use
+
+**1. Sign Up & Create an Agent**
+Register an account, then create an agent by providing a GitHub repo URL, choosing an LLM provider (Ollama or Gemini), and selecting a vector database. The system immediately begins ingesting the repo's source code and all issues into its knowledge base.
+
+**2. Connect GitHub**
+Install the GitHub App (or provide a Personal Access Token) so that webhook events flow from your repo into PR Guardian. Every new or updated PR triggers an automatic review.
+
+**3. Pipeline Reviews PRs Automatically**
+Each incoming PR passes through four sequential detection layers — spam, malicious code, hijack-proof, and summary. If any layer flags the PR, it's declined and the author's GitHub account gets a strike. Clean PRs get their title and description rewritten in conventional-commits format.
+
+**4. Monitor from the Dashboard**
+The dashboard shows aggregate stats (total PRs, approval rate, flagged accounts), a per-agent breakdown, an immutable event log with every decision, and a flagged-accounts panel showing users who've been caught.
+
+**5. Manage Agents**
+Pause, resume, or delete agents. Edit LLM provider and vector DB settings. Trigger manual knowledge-base re-syncs from the agent settings page.
+
+## 🧠 Implementation Process
+
+### System Architecture
+
+```mermaid
+flowchart TD
+    A[GitHub Webhook] --> B[FastAPI Backend]
+    B --> C{Valid HMAC-SHA256?}
+    C -->|No| D[Reject 401]
+    C -->|Yes| E{Rate Limited?}
+    E -->|Yes| F[Auto-Flag Account]
+    E -->|No| G{Payload > 500KB?}
+    G -->|Yes| H[Ignore]
+    G -->|No| I[Run Pipeline]
+    I --> J[Layer 1: Spam Detection]
+    J -->|Declined| K[Flag Account]
+    K --> L[Decline PR]
+    J -->|Clean| M[Layer 2: Malicious Code]
+    M -->|Declined| K
+    M -->|Clean| N[Layer 3: Hijack-Proof]
+    N -->|Declined| K
+    N -->|Clean| O[Layer 4: Summary]
+    O --> P[Rewrite Title/Body]
+    P --> Q[Post to GitHub]
+    Q --> R[Approve PR]
 ```
-GitHub Webhook → FastAPI → LangGraph Pipeline → 4 Detection Layers
-                                                        │
-                                                    ┌───────┤
-                                                    ▼       ▼
-                                              [Clean PR]  [Flagged PR]
-                                              Rewrite     Decline +
-                                              title/body  Flag account
-                                              → GitHub    → GitHub
+
+### RAG Ingestion Flow
+
+```mermaid
+flowchart TD
+    A[Agent Created] --> B[Fetch Repo File Tree]
+    B --> C[Download Text Blobs]
+    C --> D[Fetch Issues + Comments]
+    D --> E[Chunk Content<br/>512 tokens, 50 overlap]
+    E --> F[Embed Chunks<br/>via Ollama/Gemini]
+    F --> G[Store in pgvector<br/>KnowledgeChunk table]
+    G --> H[Agent Status: done]
 ```
 
-### Pipeline Layers
-1. **Spam Detection** — heuristic checks + RAG-informed LLM scoring
-2. **Malicious Code** — regex static scan + LLM analysis of high-risk hunks
-3. **Hijack-Proof** — prompt injection detection (regex + base64 decode + LLM)
-4. **Summary & Approval** — rewrites PR title/description in conventional-commits format
+### Key Algorithms & Logic
 
-A PR that fails any layer is **immediately declined** and never reaches the next layer.
+**Spam Detection (Layer 1):**
+- Heuristic pre-checks: empty body with no linked issue, trivial diff (< 5 changed lines), bot-like regex patterns (promo links, crypto spam)
+- RAG retrieval using PR title + first 500 chars of diff as query against the knowledge base
+- LLM scoring 0.0–1.0 with repository context; threshold > 0.75 → decline
+- Belt-and-suspenders: either heuristic OR LLM triggers a decline
 
-## Tech Stack
+**Malicious Code Detection (Layer 2):**
+- Static regex scan of the diff: `eval()`, `exec()`, `subprocess`, `os.system`, `base64.b64decode`, hardcoded IPs, secret exfiltration patterns, reverse shells, keyloggers, pickle deserialization, ctypes shellcode
+- High-risk hunks sent to the LLM for deeper analysis
+- Either static scan OR LLM detection → decline (no consensus required)
 
-| Layer | Technology |
-|---|---|
-| Frontend | Next.js 14 (App Router) + Shadcn UI + Tailwind |
-| Backend | FastAPI (Python 3.11+) + SQLAlchemy 2.x async |
-| Database | PostgreSQL 16 + pgvector |
-| Orchestration | LangGraph |
-| LLM | Ollama (local) or Gemini Flash |
-| Auth | JWT (python-jose) + bcrypt |
+**Hijack-Proof Detection (Layer 3):**
+- Regex pattern library: "ignore previous instructions", "you are now", role-play overrides, system role injection, base64-encoded payloads, URL-encoded payloads
+- Decode-and-scan: base64 and URL-decoded strings are re-scanned against high-signal patterns
+- LLM analysis with injection-resistant system prompt — all untrusted content wrapped in `<pr_content>` XML delimiters
+- Any detection → immediate decline + flag (no LLM needed for regex hits)
 
-## Quick Start
+**Summary Layer (Layer 4):**
+- RAG retrieves top-8 chunks from issues and code similar to the diff
+- LLM generates conventional-commits title (`feat|fix|refactor|...`) and structured description (what changed, why, linked issues, impact)
+- Updated title and body posted back to the GitHub PR via API
+
+**Account Flagging:**
+- Every declined PR increments `flag_count` on the `GithubAccount` model
+- At `flag_count >= 3`, the account is auto-banned
+
+**Hardening (Phase 5):**
+- All external API calls wrapped with exponential backoff retry (3 attempts, 0.5s base, 8s max, jitter)
+- Webhook rejects payloads exceeding 500KB
+- Per-account rate limit: >10 PRs/hour → auto-flag without running the pipeline
+- Prometheus-style metrics at `/metrics` (pipeline runs, decisions, duration histograms)
+
+## 🛠 Tech Stack
+
+| Layer | Technology | Purpose |
+|---|---|---|
+| Frontend | Next.js 14 (App Router) + Shadcn UI + Tailwind | Dashboard, agent management, event log |
+| Backend | FastAPI (Python 3.11+) + SQLAlchemy 2.x async | REST API, pipeline orchestration |
+| Database | PostgreSQL 16 + pgvector | Primary store + vector embeddings |
+| Orchestration | LangGraph | Multi-layer PR review pipeline with conditional routing |
+| LLM | Ollama (local) or Gemini Flash | Code analysis, spam scoring, PR summarization |
+| Auth | JWT (python-jose) + bcrypt | User authentication |
+| Embeddings | nomic-embed-text / text-embedding-004 | RAG knowledge base chunk embeddings |
+| Deployment | Docker + Nginx | Multi-container production deployment |
+
+## 📦 Setup & Installation
 
 ### Prerequisites
-- Docker & Docker Compose
-- (Optional) Ollama running locally for the LLM backend
 
-### 1. Clone & Configure
+- Python 3.11+
+- Node.js 20+
+- Docker & Docker Compose (for database or full deployment)
+- Ollama (optional, for local LLM) or a Gemini API key
+
+### Option A: Full Docker Deployment
 
 ```bash
 git clone <repo-url> pr-guardian
 cd pr-guardian
 cp .env.example backend/.env
-# Edit backend/.env with your real values (SECRET_KEY, GITHUB_WEBHOOK_SECRET, etc.)
-```
-
-### 2. Start with Docker Compose
-
-```bash
+# Edit backend/.env with your real values
 docker compose up -d
 ```
 
-This starts: PostgreSQL (pgvector), backend (FastAPI), frontend (Next.js), and nginx reverse proxy on port 80.
-
 For local LLM support:
+
 ```bash
 docker compose --profile ollama up -d
 docker exec prguardian-ollama ollama pull llama3
 docker exec prguardian-ollama ollama pull nomic-embed-text
 ```
 
-### 3. Local Development (without Docker)
+The app is available at `http://localhost` (nginx proxies port 80).
+
+### Option B: Local Development
+
+**Database:**
 
 ```bash
-# Start PostgreSQL (with pgvector)
 docker compose up -d postgres
+```
 
-# Backend
+**Backend:**
+
+```bash
 cd backend
 python -m venv .venv
-.venv/bin/activate       # Windows: .venv\Scripts\activate
+# Windows: .venv\Scripts\activate
+# Unix: source .venv/bin/activate
 pip install -r requirements.txt
+cp ../.env.example .env
+# Edit .env with your values
 alembic upgrade head
 uvicorn app.main:app --reload
+```
 
-# Frontend (separate terminal)
+Backend runs at `http://localhost:8000`.
+
+**Frontend:**
+
+```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-### 4. Set Up GitHub Integration
+Frontend runs at `http://localhost:3000`.
 
-**Option A: Personal Access Token (quickest for dev)**
-1. Go to GitHub → Settings → Developer settings → Personal access tokens
-2. Generate a token with `repo` scope
-3. Add `GITHUB_TOKEN=<your-token>` to `backend/.env`
+### Environment Variables
 
-**Option B: GitHub App (recommended for production)**
-1. Create a GitHub App at https://github.com/settings/apps
-2. Set the webhook URL to `http://your-domain/webhooks/github`
-3. Generate a private key, save as `backend/github-app.pem`
-4. Add `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY_PATH` to `.env`
-5. Install the app on the repos you want to guard
+| Variable | Description | Default |
+|---|---|---|
+| `DATABASE_URL` | PostgreSQL async connection string | `postgresql+asyncpg://postgres:postgres@localhost:5432/prguardian` |
+| `SECRET_KEY` | JWT signing key (use a long random string) | — |
+| `GITHUB_WEBHOOK_SECRET` | HMAC secret for GitHub webhook validation | — |
+| `GITHUB_TOKEN` | Personal Access Token (dev mode) | — |
+| `GITHUB_APP_ID` | GitHub App ID (production mode) | — |
+| `LLM_PROVIDER` | `ollama` or `gemini` | `ollama` |
+| `OLLAMA_BASE_URL` | Ollama server URL | `http://localhost:11434` |
+| `OLLAMA_MODEL` | Chat model name | `llama3` |
+| `GEMINI_API_KEY` | Google Gemini API key | — |
+| `EMBEDDING_DIM` | Embedding vector dimension | `768` |
+| `SPAM_THRESHOLD` | Spam score threshold to decline | `0.75` |
+| `MAX_PR_DIFF_BYTES` | Max webhook payload size | `524288` |
 
-## Endpoints
+## 🔗 API Endpoints
 
-| Endpoint | Description |
-|---|---|
-| `POST /webhooks/github` | GitHub webhook receiver (HMAC-validated) |
-| `POST /api/auth/register` | Register a new user |
-| `POST /api/auth/login` | Login, returns JWT access token |
-| `GET /api/agents` | List current user's agents |
-| `POST /api/agents` | Create an agent (triggers repo ingestion) |
-| `POST /api/agents/{id}/sync` | Re-sync the knowledge base |
-| `GET /api/events` | Paginated PR event log |
-| `GET /api/dashboard/stats` | Aggregate stats (approved/declined/flagged) |
-| `GET /api/dashboard/flagged-accounts` | Flagged GitHub accounts |
-| `GET /metrics` | Prometheus-style metrics |
-| `GET /health` | Liveness probe |
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/auth/register` | No | Register a new user |
+| `POST` | `/api/auth/login` | No | Login, returns JWT access token |
+| `GET` | `/api/auth/me` | Yes | Get current user profile |
+| `GET` | `/api/agents` | Yes | List current user's agents |
+| `POST` | `/api/agents` | Yes | Create an agent (triggers repo ingestion) |
+| `GET` | `/api/agents/{id}` | Yes | Get agent details |
+| `PATCH` | `/api/agents/{id}` | Yes | Update agent (name, active, LLM, vector DB) |
+| `DELETE` | `/api/agents/{id}` | Yes | Delete an agent |
+| `POST` | `/api/agents/{id}/sync` | Yes | Trigger manual knowledge-base re-sync |
+| `GET` | `/api/events` | Yes | Paginated PR event log (filter by agent, decision) |
+| `GET` | `/api/events/count` | Yes | Count events matching filters |
+| `GET` | `/api/dashboard/stats` | Yes | Aggregate stats (total, approved, declined, flagged) |
+| `GET` | `/api/dashboard/per-agent` | Yes | Stats broken down per agent |
+| `GET` | `/api/dashboard/flagged-accounts` | Yes | Flagged GitHub accounts for user's agents |
+| `POST` | `/webhooks/github` | HMAC | GitHub webhook receiver |
+| `POST` | `/webhooks/rotate-secret` | HMAC | Rotate webhook HMAC secret |
+| `GET` | `/metrics` | No | Prometheus-style metrics |
+| `GET` | `/health` | No | Liveness probe |
 
-## Environment Variables
-
-See [`.env.example`](.env.example) for the full list. Key variables:
-
-- `DATABASE_URL` — PostgreSQL connection string
-- `SECRET_KEY` — JWT signing key (generate a long random string)
-- `GITHUB_WEBHOOK_SECRET` — Shared secret for GitHub webhook HMAC validation
-- `GITHUB_TOKEN` or `GITHUB_APP_ID` + private key — GitHub API authentication
-- `LLM_PROVIDER` — `ollama` (local) or `gemini` (cloud)
-
-## Project Structure
+## 📁 Project Structure
 
 ```
 pr-guardian/
-├── backend/           # FastAPI application
+├── backend/
 │   ├── app/
-│   │   ├── api/       # Route handlers
-│   │   ├── core/      # Config, database, security, metrics
-│   │   ├── models/    # SQLAlchemy ORM models
-│   │   ├── pipeline/  # LangGraph orchestration (4 layers)
-│   │   ├── schemas/   # Pydantic request/response schemas
-│   │   └── services/  # GitHub client, LLM, RAG, ingestion
-│   └── alembic/       # DB migrations
-├── frontend/          # Next.js 14 App Router
-│   ├── app/           # Pages (dashboard, agents, events)
-│   ├── components/    # Shadcn UI + custom components
-│   └── lib/           # API client, types, auth
-├── nginx/             # Reverse proxy config
+│   │   ├── api/
+│   │   │   ├── agents.py
+│   │   │   ├── auth.py
+│   │   │   ├── dashboard.py
+│   │   │   ├── deps.py
+│   │   │   ├── events.py
+│   │   │   └── webhooks.py
+│   │   ├── core/
+│   │   │   ├── config.py
+│   │   │   ├── database.py
+│   │   │   ├── metrics.py
+│   │   │   └── security.py
+│   │   ├── models/
+│   │   │   ├── agent.py
+│   │   │   ├── github_account.py
+│   │   │   ├── knowledge_chunk.py
+│   │   │   ├── pr_event.py
+│   │   │   └── user.py
+│   │   ├── pipeline/
+│   │   │   ├── graph.py
+│   │   │   ├── runner.py
+│   │   │   ├── state.py
+│   │   │   └── nodes/
+│   │   │       ├── spam.py
+│   │   │       ├── malicious_code.py
+│   │   │       ├── hijack_proof.py
+│   │   │       ├── summary.py
+│   │   │       ├── flag_account.py
+│   │   │       ├── approve_pr.py
+│   │   │       └── decline_pr.py
+│   │   ├── schemas/
+│   │   │   ├── agent.py
+│   │   │   ├── auth.py
+│   │   │   ├── dashboard.py
+│   │   │   └── event.py
+│   │   ├── services/
+│   │   │   ├── chunker.py
+│   │   │   ├── github.py
+│   │   │   ├── ingestion.py
+│   │   │   ├── llm.py
+│   │   │   ├── rag.py
+│   │   │   ├── resilience.py
+│   │   │   └── vectorstore.py
+│   │   └── main.py
+│   ├── alembic/
+│   │   ├── env.py
+│   │   └── versions/
+│   │       ├── 0001_initial_schema.py
+│   │       └── 0002_knowledge_chunks.py
+│   ├── alembic.ini
+│   ├── Dockerfile
+│   └── requirements.txt
+├── frontend/
+│   ├── app/
+│   │   ├── (auth)/
+│   │   │   ├── login/page.tsx
+│   │   │   └── signup/page.tsx
+│   │   ├── (app)/
+│   │   │   ├── dashboard/
+│   │   │   │   ├── page.tsx
+│   │   │   │   └── events/page.tsx
+│   │   │   ├── agents/
+│   │   │   │   ├── new/page.tsx
+│   │   │   │   └── [id]/
+│   │   │   │       ├── page.tsx
+│   │   │   │       └── settings/page.tsx
+│   │   │   └── layout.tsx
+│   │   ├── layout.tsx
+│   │   └── page.tsx
+│   ├── components/
+│   │   ├── custom/
+│   │   │   ├── app-shell.tsx
+│   │   │   └── auth-guard.tsx
+│   │   └── ui/
+│   │       ├── badge.tsx
+│   │       ├── button.tsx
+│   │       ├── card.tsx
+│   │       ├── input.tsx
+│   │       ├── label.tsx
+│   │       └── select.tsx
+│   ├── lib/
+│   │   ├── api.ts
+│   │   ├── auth.ts
+│   │   ├── types.ts
+│   │   └── utils.ts
+│   ├── Dockerfile
+│   ├── next.config.mjs
+│   └── package.json
+├── nginx/
+│   └── nginx.conf
 ├── docker-compose.yml
 └── .env.example
 ```
 
-## License
+## 📤 Exports
+
+### Backend (Python)
+
+| Module | Export | Type |
+|---|---|---|
+| `app.pipeline` | `PRState` | TypedDict — shared pipeline state schema |
+| `app.pipeline.graph` | `pipeline` | Compiled LangGraph `CompiledGraph` |
+| `app.pipeline.runner` | `run_pipeline()` | Async entrypoint: `repo_full_name, pr_number, pr_url, author → dict` |
+| `app.services.llm` | `get_llm_response()` | Async: `prompt, system, provider, model, temperature → str` |
+| `app.services.llm` | `get_embedding()` | Async: `text, provider, model → list[float]` |
+| `app.services.llm` | `embed_batch()` | Async: `texts, provider → list[list[float]]` |
+| `app.services.llm` | `resolve_provider()` | `agent → "ollama" \| "gemini"` |
+| `app.services.rag` | `retrieve()` | Async: `agent, query, k → list[ChunkHit]` |
+| `app.services.rag` | `retrieve_texts()` | Async: `agent, query, k → list[str]` |
+| `app.services.vectorstore` | `vector_store` | `PgVectorStore` singleton — `search()`, `add()`, `reset()` |
+| `app.services.resilience` | `retry_async()` | Async: `func, attempts, base_delay, max_delay → T` |
+| `app.core.metrics` | `serialize_metrics()` | Returns Prometheus text-format metrics string |
+| `app.core.metrics` | `inc_counter()` | Increment a named counter with optional labels |
+| `app.core.metrics` | `observe_histogram()` | Record a value in a named histogram |
+
+### Frontend (TypeScript)
+
+| Module | Export | Type |
+|---|---|---|
+| `lib/api` | `api` | Object with all API methods (login, agents, events, dashboard) |
+| `lib/api` | `getToken()` / `setToken()` / `clearToken()` | JWT token localStorage helpers |
+| `lib/auth` | `useSession` | React hook for authentication state |
+| `lib/types` | `Agent`, `PREvent`, `DashboardStats`, etc. | All shared TypeScript interfaces |
+
+## 📄 License
 
 MIT
