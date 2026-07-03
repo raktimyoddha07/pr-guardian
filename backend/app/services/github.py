@@ -343,6 +343,7 @@ class GithubClient:
         *,
         title: str | None = None,
         body: str | None = None,
+        state: str | None = None,
     ) -> None:
         headers = await self._headers(repo_full_name)
         payload: dict[str, Any] = {}
@@ -350,6 +351,8 @@ class GithubClient:
             payload["title"] = title
         if body is not None:
             payload["body"] = body
+        if state is not None:
+            payload["state"] = state  # "open" or "closed"
         if not payload:
             return
         await retry_async(

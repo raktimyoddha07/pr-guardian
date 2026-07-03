@@ -1,7 +1,7 @@
 """Shared — Decline PR node.
 
-Posts an optional comment to the PR explaining the decline, then returns
-final state. No-op if the comment post fails (logged only).
+Posts an optional comment to the PR explaining the decline, closes the PR,
+then returns final state. No-op if the API calls fail (logged only).
 """
 from __future__ import annotations
 
@@ -36,5 +36,12 @@ async def decline_pr(state: PRState) -> dict:
         await github_client.post_pr_comment(repo, pr_number, body)
     except GithubError as exc:
         logger.warning("decline_pr: failed to post comment (%s)", exc)
+
+    # Close the PR (best-effort).
+    try:
+        await github_client.update_pr(repo, pr_number, state="closed")
+        logger.info("decline_pr: closed PR #%s on %s", pr_number, repo)
+    except GithubError as exc:
+        logger.warning("decline_pr: failed to close PR (%s)", exc)
 
     return {"final_decision": "declined"}

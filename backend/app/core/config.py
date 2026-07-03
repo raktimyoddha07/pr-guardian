@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     GITHUB_APP_PRIVATE_KEY_PATH: str | None = None
     GITHUB_WEBHOOK_SECRET: str = "change-me-webhook-secret"
     GITHUB_TOKEN: str | None = None  # optional PAT fallback for the github client
+    # GitHub OAuth
+    GITHUB_CLIENT_ID: str | None = None
+    GITHUB_CLIENT_SECRET: str | None = None
 
     # Vector DB — pgvector only (embeddings stored in the KnowledgeChunk table
     # alongside the rest of the data; no separate service). EMBEDDING_DIM is set
@@ -49,14 +52,14 @@ class Settings(BaseSettings):
     LLM_PROVIDER: Literal["ollama", "gemini"] = "ollama"
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3"
-    OLLAMA_EMBED_MODEL: str = "nomic-embed-text"
+    OLLAMA_EMBED_MODEL: str = "bge-m3"
     GEMINI_API_KEY: str | None = None
     GEMINI_MODEL: str = "gemini-1.5-flash"
     GEMINI_EMBED_MODEL: str = "text-embedding-004"
-    # Dimensionality of the chosen embedding model. nomic-embed-text = 768,
+    # Dimensionality of the chosen embedding model. bge-m3 = 1024,
     # Gemini text-embedding-004 = 768 (configurable, but default 768). pgvector
     # stores vectors of exactly this width.
-    EMBEDDING_DIM: int = 768
+    EMBEDDING_DIM: int = 1024
 
     # RAG
     RAG_CHUNK_TOKENS: int = 512

@@ -15,6 +15,8 @@ import type {
   AgentStats,
   DashboardStats,
   FlaggedAccount,
+  GitHubConnection,
+  GitHubRepo,
   PREvent,
   Token,
   User,
@@ -175,5 +177,21 @@ export const api = {
     return request<FlaggedAccount[]>("/api/dashboard/flagged-accounts", {
       query: agentId !== undefined ? { agent_id: agentId } : undefined,
     });
+  },
+
+  // ----------------------------------------------------------- GitHub OAuth
+  async getGitHubAuthUrl(): Promise<{ authorization_url: string }> {
+    return request<{ authorization_url: string }>("/github/oauth/authorize");
+  },
+  async listGitHubConnections(): Promise<GitHubConnection[]> {
+    return request<GitHubConnection[]>("/github/connections");
+  },
+  async deleteGitHubConnection(connectionId: number): Promise<{ message: string }> {
+    return request<{ message: string }>(`/github/connections/${connectionId}`, {
+      method: "DELETE",
+    });
+  },
+  async listGitHubRepos(connectionId: number): Promise<GitHubRepo[]> {
+    return request<GitHubRepo[]>(`/github/connections/${connectionId}/repos`);
   },
 };

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -21,17 +21,59 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ApiError, api } from "@/lib/api";
-import type { LlmProvider, VectorDbType } from "@/lib/types";
+import type { LlmProvider, VectorDbType, GitHubConnection, GitHubRepo } from "@/lib/types";
+import { Github, AlertCircle } from "lucide-react";
 
 export default function NewAgentPage() {
   const router = useRouter();
 
   const [name, setName] = useState("");
-  const [repo, setRepo] = useState("");
+  const [selectedConnection, setSelectedConnection] = useState<number | null>(null);
+  const [selectedRepo, setSelectedRepo] = useState("");
   const [llm, setLlm] = useState<LlmProvider>("ollama");
   const [vectorDb, setVectorDb] = useState<VectorDbType>("pgvector");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [connections, setConnections] = useState<GitHubConnection[]>([]);
+  const [repos, setRepos] = useState<GitHubRepo[]>([]);
+  const [loadingRepos, setLoadingRepos] = useState(false);
+
+  useEffect(() => {
+    loadConnections();
+  }, []);
+
+  const loadConnections = async () => {
+    try {
+      const conns = await api.listGitHubConnections();
+      setConnections(conns);
+    } catch (error) {
+      console.error("Failed to load GitHub connections:", error);
+    }
+  };
+
+  const loadRepos = async (connectionId: number) => {
+    setLoadingRepos(true);
+    try {
+      const repoList = await api.listGitHubRepos(connectionId);
+      setRepos(repoList);
+    } catch (error) {
+      console.error("Failed to load repos:", error);
+      setRepos([]);
+    } finally {
+      setLoadingRepos(false);
+    }
+  };
+
+  const handleConnectionChange = (connectionId: string) => {
+    const id = parseInt(connectionId);
+    setSelectedConnection(id);
+    setSelectedRepo("");
+    if (id) {
+      loadRepos(id);
+    } else {
+      setRepos([]);
+    }
+  };
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -40,9 +82,10 @@ export default function NewAgentPage() {
     try {
       const agent = await api.createAgent({
         name: name.trim(),
-        repo_full_name: repo.trim(),
+        repo_full_name: selectedRepo.trim(),
         llm_provider: llm,
         vector_db_type: vectorDb,
+        github_installation_id: selectedConnection,
       });
       router.push(`/agents/${agent.id}`);
     } catch (err) {
@@ -65,9 +108,7 @@ export default function NewAgentPage() {
         <CardHeader>
           <CardTitle>Agent details</CardTitle>
           <CardDescription>
-            The repo can be given as <code>owner/name</code> or a full GitHub
-            URL. After creating the agent, install the GitHub App on the repo
-            and set up the webhook (covered in the README).
+            Select a connected GitHub account and choose a repository to monitor.
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
@@ -77,58 +118,121 @@ export default function NewAgentPage() {
                 {error}
               </div>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="name">Agent name</Label>
-              <Input
-                id="name"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Backend Guardian"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="repo">Repository</Label>
-              <Input
-                id="repo"
-                required
-                value={repo}
-                onChange={(e) => setRepo(e.target.value)}
-                placeholder="octocat/Hello-World or https://github.com/octocat/Hello-World"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>LLM provider</Label>
-                <Select
-                  value={llm}
-                  onValueChange={(v) => setLlm(v as LlmProvider)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ollama">Ollama (local)</SelectItem>
-                    <SelectItem value="gemini">Gemini Flash</SelectItem>
-                  </SelectContent>
-                </Select>
+            
+            {connections.length === 0 ? (
+              <div className="rounded-md bg-amber-50 border border-amber-200 p-4">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-amber-800">
+                      No GitHub accounts connected
+                    </p>
+                    <p className="text-sm text-amber-700 mt-1">
+                      Connect a GitHub account from the sidebar to create an agent.
+                    </p>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Vector DB</Label>
-                <Select
-                  value={vectorDb}
-                  onValueChange={(v) => setVectorDb(v as VectorDbType)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select vector DB" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pgvector">pgvector</SelectItem>
-                    <SelectItem value="chromadb">ChromaDB</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="name">Agent name</Label>
+                  <Input
+                    id="name"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Backend Guardian"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="connection">GitHub Account</Label>
+                  <Select
+                    value={selectedConnection?.toString() || ""}
+                    onValueChange={handleConnectionChange}
+                  >
+                    <SelectTrigger id="connection">
+                      <SelectValue placeholder="Select a connected account" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {connections.map((conn) => (
+                        <SelectItem key={conn.id} value={conn.id.toString()}>
+                          <div className="flex items-center gap-2">
+                            <Github className="h-4 w-4" />
+                            {conn.github_username}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="repo">Repository</Label>
+                  <Select
+                    value={selectedRepo}
+                    onValueChange={setSelectedRepo}
+                    disabled={!selectedConnection || loadingRepos}
+                  >
+                    <SelectTrigger id="repo">
+                      <SelectValue placeholder={
+                        !selectedConnection 
+                          ? "Select an account first" 
+                          : loadingRepos 
+                          ? "Loading repositories..." 
+                          : "Select a repository"
+                      } />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {repos.map((repo) => (
+                        <SelectItem key={repo.full_name} value={repo.full_name}>
+                          <div className="flex flex-col">
+                            <span>{repo.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {repo.owner}/{repo.name}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>LLM provider</Label>
+                    <Select
+                      value={llm}
+                      onValueChange={(v) => setLlm(v as LlmProvider)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select provider" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ollama">Ollama (local)</SelectItem>
+                        <SelectItem value="gemini">Gemini Flash</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Vector DB</Label>
+                    <Select
+                      value={vectorDb}
+                      onValueChange={(v) => setVectorDb(v as VectorDbType)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select vector DB" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pgvector">pgvector</SelectItem>
+                        <SelectItem value="chromadb">ChromaDB</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </>
+            )}
           </CardContent>
           <div className="flex items-center justify-end gap-3 p-6 pt-0">
             <Button
@@ -138,7 +242,7 @@ export default function NewAgentPage() {
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={loading}>
+            <Button type="submit" disabled={loading || connections.length === 0 || !selectedRepo}>
               {loading ? "Creating…" : "Create agent"}
             </Button>
           </div>

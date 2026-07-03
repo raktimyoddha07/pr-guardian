@@ -107,3 +107,22 @@ export interface FlaggedAccount {
   first_seen: string;
   updated_at: string;
 }
+
+// ----------------------------------------------------------- GitHub OAuth ----
+
+export interface GitHubConnection {
+  id: number;
+  github_username: string;
+  github_email: string | null;
+  status: "active" | "revoked" | "expired";
+  created_at: string;
+}
+
+export interface GitHubRepo {
+  full_name: string;
+  name: string;
+  owner: string;
+  description: string | null;
+  private: boolean;
+  updated_at: string;
+}

@@ -2,21 +2,21 @@
 
 > Your AI-powered Pull Request bouncer — catches spam, malicious code, and injection attacks before they reach human reviewers.
 
-PR Guardian is a RAG-powered GitHub Pull Request management system. Users create agents tied to GitHub repositories. Each agent ingests the full repo and its issues as a knowledge base, then autonomously reviews incoming PRs through a multi-layer agentic pipeline — declining dangerous PRs and polishing clean ones before they ever reach a human reviewer.
+PR Guardian is a RAG-powered GitHub Pull Request management system. Users connect their GitHub accounts via OAuth, then create agents tied to specific repositories. Each agent ingests the full repo and its issues as a knowledge base using hybrid BM25 + vector search, then autonomously reviews incoming PRs through a multi-layer agentic pipeline — declining dangerous PRs (and closing them) and polishing clean ones before they ever reach a human reviewer.
 
 ## 🚀 How to Use
 
-**1. Sign Up & Create an Agent**
-Register an account, then create an agent by providing a GitHub repo URL, choosing an LLM provider (Ollama or Gemini), and selecting a vector database. The system immediately begins ingesting the repo's source code and all issues into its knowledge base.
+**1. Sign Up & Connect GitHub**
+Register an account, then connect your GitHub account via OAuth from the sidebar. This grants PR Guardian full permissions to manage your repositories and pull requests.
 
-**2. Connect GitHub**
-Install the GitHub App (or provide a Personal Access Token) so that webhook events flow from your repo into PR Guardian. Every new or updated PR triggers an automatic review.
+**2. Create an Agent**
+Select a connected GitHub account, choose a repository from your accessible repos, then configure the LLM provider (Ollama or Gemini) and vector database. The system immediately begins ingesting the repo's source code and all issues into its knowledge base using the bge-m3 embedding model.
 
 **3. Pipeline Reviews PRs Automatically**
-Each incoming PR passes through four sequential detection layers — spam, malicious code, hijack-proof, and summary. If any layer flags the PR, it's declined and the author's GitHub account gets a strike. Clean PRs get their title and description rewritten in conventional-commits format.
+Each incoming PR passes through four sequential detection layers — spam, malicious code, hijack-proof, and summary. If any layer flags the PR, it's automatically closed with a comment explaining the reason, and the author's GitHub account gets a strike. Clean PRs get their title and description rewritten in conventional-commits format.
 
 **4. Monitor from the Dashboard**
-The dashboard shows aggregate stats (total PRs, approval rate, flagged accounts), a per-agent breakdown, an immutable event log with every decision, and a flagged-accounts panel showing users who've been caught.
+The modern sidebar-oriented dashboard shows aggregate stats (total PRs, approval rate, flagged accounts), a per-agent breakdown, an immutable event log with every decision, and a flagged-accounts panel showing users who've been caught.
 
 **5. Manage Agents**
 Pause, resume, or delete agents. Edit LLM provider and vector DB settings. Trigger manual knowledge-base re-syncs from the agent settings page.
@@ -65,7 +65,7 @@ flowchart TD
 
 **Spam Detection (Layer 1):**
 - Heuristic pre-checks: empty body with no linked issue, trivial diff (< 5 changed lines), bot-like regex patterns (promo links, crypto spam)
-- RAG retrieval using PR title + first 500 chars of diff as query against the knowledge base
+- Hybrid RAG retrieval (BM25 + vector search) using PR title + first 500 chars of diff as query against the knowledge base
 - LLM scoring 0.0–1.0 with repository context; threshold > 0.75 → decline
 - Belt-and-suspenders: either heuristic OR LLM triggers a decline
 
@@ -81,7 +81,7 @@ flowchart TD
 - Any detection → immediate decline + flag (no LLM needed for regex hits)
 
 **Summary Layer (Layer 4):**
-- RAG retrieves top-8 chunks from issues and code similar to the diff
+- Hybrid RAG retrieves top-8 chunks from issues and code similar to the diff
 - LLM generates conventional-commits title (`feat|fix|refactor|...`) and structured description (what changed, why, linked issues, impact)
 - Updated title and body posted back to the GitHub PR via API
 
@@ -99,13 +99,14 @@ flowchart TD
 
 | Layer | Technology | Purpose |
 |---|---|---|
-| Frontend | Next.js 14 (App Router) + Shadcn UI + Tailwind | Dashboard, agent management, event log |
-| Backend | FastAPI (Python 3.11+) + SQLAlchemy 2.x async | REST API, pipeline orchestration |
-| Database | PostgreSQL 16 + pgvector | Primary store + vector embeddings |
+| Frontend | Next.js 14 (App Router) + Shadcn UI + Tailwind | Modern sidebar-oriented dashboard, agent management, event log |
+| Backend | FastAPI (Python 3.11+) + SQLAlchemy 2.x async | REST API, pipeline orchestration, GitHub OAuth |
+| Database | PostgreSQL 16 + pgvector | Primary store + vector embeddings (1024-dim) |
 | Orchestration | LangGraph | Multi-layer PR review pipeline with conditional routing |
 | LLM | Ollama (local) or Gemini Flash | Code analysis, spam scoring, PR summarization |
-| Auth | JWT (python-jose) + bcrypt | User authentication |
-| Embeddings | nomic-embed-text / text-embedding-004 | RAG knowledge base chunk embeddings |
+| Auth | JWT (python-jose) + bcrypt + GitHub OAuth | User authentication + GitHub account connection |
+| Embeddings | bge-m3 (Ollama) / text-embedding-004 (Gemini) | RAG knowledge base chunk embeddings (1024-dim) |
+| Search | Hybrid BM25 + Vector Search | Improved retrieval accuracy for RAG |
 | Deployment | Docker + Nginx | Multi-container production deployment |
 
 ## 📦 Setup & Installation
@@ -132,7 +133,7 @@ For local LLM support:
 ```bash
 docker compose --profile ollama up -d
 docker exec prguardian-ollama ollama pull llama3
-docker exec prguardian-ollama ollama pull nomic-embed-text
+docker exec prguardian-ollama ollama pull bge-m3
 ```
 
 The app is available at `http://localhost` (nginx proxies port 80).
@@ -180,11 +181,16 @@ Frontend runs at `http://localhost:3000`.
 | `GITHUB_WEBHOOK_SECRET` | HMAC secret for GitHub webhook validation | — |
 | `GITHUB_TOKEN` | Personal Access Token (dev mode) | — |
 | `GITHUB_APP_ID` | GitHub App ID (production mode) | — |
+| `GITHUB_CLIENT_ID` | GitHub OAuth App Client ID | — |
+| `GITHUB_CLIENT_SECRET` | GitHub OAuth App Client Secret | — |
 | `LLM_PROVIDER` | `ollama` or `gemini` | `ollama` |
 | `OLLAMA_BASE_URL` | Ollama server URL | `http://localhost:11434` |
 | `OLLAMA_MODEL` | Chat model name | `llama3` |
+| `OLLAMA_EMBED_MODEL` | Embedding model name | `bge-m3` |
 | `GEMINI_API_KEY` | Google Gemini API key | — |
-| `EMBEDDING_DIM` | Embedding vector dimension | `768` |
+| `GEMINI_MODEL` | Gemini chat model | `gemini-1.5-flash` |
+| `GEMINI_EMBED_MODEL` | Gemini embedding model | `text-embedding-004` |
+| `EMBEDDING_DIM` | Embedding vector dimension | `1024` |
 | `SPAM_THRESHOLD` | Spam score threshold to decline | `0.75` |
 | `MAX_PR_DIFF_BYTES` | Max webhook payload size | `524288` |
 
@@ -206,6 +212,11 @@ Frontend runs at `http://localhost:3000`.
 | `GET` | `/api/dashboard/stats` | Yes | Aggregate stats (total, approved, declined, flagged) |
 | `GET` | `/api/dashboard/per-agent` | Yes | Stats broken down per agent |
 | `GET` | `/api/dashboard/flagged-accounts` | Yes | Flagged GitHub accounts for user's agents |
+| `GET` | `/github/oauth/authorize` | Yes | Get GitHub OAuth authorization URL |
+| `GET` | `/github/oauth/callback` | No | Handle GitHub OAuth callback |
+| `GET` | `/github/connections` | Yes | List user's GitHub connections |
+| `DELETE` | `/github/connections/{id}` | Yes | Delete a GitHub connection |
+| `GET` | `/github/connections/{id}/repos` | Yes | List repos accessible via connection |
 | `POST` | `/webhooks/github` | HMAC | GitHub webhook receiver |
 | `POST` | `/webhooks/rotate-secret` | HMAC | Rotate webhook HMAC secret |
 | `GET` | `/metrics` | No | Prometheus-style metrics |
@@ -223,6 +234,8 @@ pr-guardian/
 │   │   │   ├── dashboard.py
 │   │   │   ├── deps.py
 │   │   │   ├── events.py
+│   │   │   ├── github.py
+│   │   │   ├── github_oauth.py
 │   │   │   └── webhooks.py
 │   │   ├── core/
 │   │   │   ├── config.py
@@ -232,6 +245,7 @@ pr-guardian/
 │   │   ├── models/
 │   │   │   ├── agent.py
 │   │   │   ├── github_account.py
+│   │   │   ├── github_connection.py
 │   │   │   ├── knowledge_chunk.py
 │   │   │   ├── pr_event.py
 │   │   │   └── user.py
@@ -289,7 +303,8 @@ pr-guardian/
 │   ├── components/
 │   │   ├── custom/
 │   │   │   ├── app-shell.tsx
-│   │   │   └── auth-guard.tsx
+│   │   │   ├── auth-guard.tsx
+│   │   │   └── sidebar.tsx
 │   │   └── ui/
 │   │       ├── badge.tsx
 │   │       ├── button.tsx
@@ -324,7 +339,7 @@ pr-guardian/
 | `app.services.llm` | `get_embedding()` | Async: `text, provider, model → list[float]` |
 | `app.services.llm` | `embed_batch()` | Async: `texts, provider → list[list[float]]` |
 | `app.services.llm` | `resolve_provider()` | `agent → "ollama" \| "gemini"` |
-| `app.services.rag` | `retrieve()` | Async: `agent, query, k → list[ChunkHit]` |
+| `app.services.rag` | `retrieve()` | Async: `agent, query, k, alpha → list[ChunkHit]` (hybrid BM25 + vector) |
 | `app.services.rag` | `retrieve_texts()` | Async: `agent, query, k → list[str]` |
 | `app.services.vectorstore` | `vector_store` | `PgVectorStore` singleton — `search()`, `add()`, `reset()` |
 | `app.services.resilience` | `retry_async()` | Async: `func, attempts, base_delay, max_delay → T` |
