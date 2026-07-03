@@ -165,6 +165,9 @@ export const api = {
   async listEvents(params: {
     agent_id?: number;
     decision?: string;
+    layer_caught?: string;
+    start_date?: string;
+    end_date?: string;
     limit?: number;
     offset?: number;
   } = {}): Promise<PREvent[]> {

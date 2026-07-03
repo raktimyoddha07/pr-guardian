@@ -101,11 +101,11 @@ flowchart TD
 |---|---|---|
 | Frontend | Next.js 14 (App Router) + Shadcn UI + Tailwind | Modern sidebar-oriented dashboard, agent management, event log |
 | Backend | FastAPI (Python 3.11+) + SQLAlchemy 2.x async | REST API, pipeline orchestration, GitHub OAuth |
-| Database | PostgreSQL 16 + pgvector | Primary store + vector embeddings (1024-dim) |
+| Database | PostgreSQL 16 + pgvector | Primary store + vector embeddings (768-dim) |
 | Orchestration | LangGraph | Multi-layer PR review pipeline with conditional routing |
 | LLM | Ollama (local) | Code analysis, spam scoring, PR summarization |
 | Auth | JWT (python-jose) + bcrypt + GitHub OAuth + Google OAuth | User authentication + GitHub/Google account connection |
-| Embeddings | bge-m3 (Ollama) | RAG knowledge base chunk embeddings (1024-dim) |
+| Embeddings | nomic-embed-text (Ollama) | RAG knowledge base chunk embeddings (768-dim) |
 | Search | Hybrid BM25 + Vector Search | Improved retrieval accuracy for RAG |
 | Deployment | Docker + Nginx | Multi-container production deployment |
 

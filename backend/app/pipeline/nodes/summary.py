@@ -48,7 +48,8 @@ async def summary_layer(state: PRState) -> dict:
     logger.info("summary_layer: PR #%s", state.get("pr_number"))
 
     agent = state.get("agent")
-    query = f"{pr_title}\n{pr_diff[:500]}"
+    # Use PR title, body, and diff for RAG retrieval to get most relevant context
+    query = f"{pr_title}\n{pr_body[:300]}\n{pr_diff[:500]}"
     try:
         context_chunks = await retrieve_texts(agent, query) if agent else []
     except Exception:  # noqa: BLE001

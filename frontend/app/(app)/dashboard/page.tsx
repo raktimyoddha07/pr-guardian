@@ -12,6 +12,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import type { Agent, AgentStats, DashboardStats, FlaggedAccount } from "@/lib/types";
 
@@ -23,12 +25,16 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Filter by agent
+  const [selectedAgentId, setSelectedAgentId] = useState<string>("");
+
+  const loadStats = () => {
+    setLoading(true);
     Promise.all([
       api.listAgents(),
-      api.getStats(),
+      api.getStats(selectedAgentId ? parseInt(selectedAgentId) : undefined),
       api.getPerAgentStats(),
-      api.listFlaggedAccounts(),
+      api.listFlaggedAccounts(selectedAgentId ? parseInt(selectedAgentId) : undefined),
     ])
       .then(([a, s, pa, f]) => {
         setAgents(a);
@@ -38,7 +44,11 @@ export default function DashboardPage() {
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load"))
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => {
+    loadStats();
+  }, [selectedAgentId]);
 
   const pct = (v: number) => `${Math.round(v * 100)}%`;
 
@@ -51,9 +61,27 @@ export default function DashboardPage() {
             Overview of PRs processed across all your agents.
           </p>
         </div>
-        <Button asChild>
-          <Link href="/agents/new">New agent</Link>
-        </Button>
+        <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="agent-filter">Filter by Agent:</Label>
+            <Select value={selectedAgentId} onValueChange={setSelectedAgentId}>
+              <SelectTrigger id="agent-filter" className="w-[200px]">
+                <SelectValue placeholder="All agents" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All agents</SelectItem>
+                {agents.map((a) => (
+                  <SelectItem key={a.id} value={String(a.id)}>
+                    {a.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button asChild>
+            <Link href="/agents/new">New agent</Link>
+          </Button>
+        </div>
       </div>
 
       {loading && <p className="text-muted-foreground">Loading…</p>}

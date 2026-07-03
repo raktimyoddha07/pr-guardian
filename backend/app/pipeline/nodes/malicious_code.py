@@ -78,6 +78,8 @@ def _static_scan(diff: str) -> list[tuple[str, str, list[str]]]:
 
 
 async def malicious_code_detection(state: PRState) -> dict:
+    pr_title = state.get("pr_title") or ""
+    pr_body = state.get("pr_body") or ""
     diff = state.get("pr_diff") or ""
     logger.info("malicious_code_detection: PR #%s", state.get("pr_number"))
 
@@ -99,14 +101,21 @@ async def malicious_code_detection(state: PRState) -> dict:
         }
 
     # Phase 2: LLM scan on high-risk hunks (or full diff if short enough).
+    # Include PR title and body for additional context
     truncated = diff[:4000]
     agent = state.get("agent")
     user_prompt = f"""\
 <pr_content>
+Title: {pr_title}
+
+Body:
+{pr_body or "(empty)"}
+
+Diff:
 {truncated}
 </pr_content>
 
-Analyze this diff for malicious code patterns. Return JSON: {{"malicious": true/false, "reason": "..."}}"""
+Analyze this PR for malicious code patterns. Return JSON: {{"malicious": true/false, "reason": "..."}}"""
 
     provider = resolve_provider(agent)
     try:
