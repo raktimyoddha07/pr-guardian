@@ -43,9 +43,11 @@ class Settings(BaseSettings):
     # GitHub OAuth
     GITHUB_CLIENT_ID: str | None = None
     GITHUB_CLIENT_SECRET: str | None = None
+    GITHUB_REDIRECT_URI: str = "http://localhost:3000/oauth/callback?provider=github"
     # Google OAuth
     GOOGLE_CLIENT_ID: str | None = None
     GOOGLE_CLIENT_SECRET: str | None = None
+    GOOGLE_REDIRECT_URI: str = "http://localhost:3000/oauth/callback?provider=google"
 
     # Email OTP
     SMTP_HOST: str | None = None

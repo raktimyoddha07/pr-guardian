@@ -122,7 +122,7 @@ export const api = {
     return { token: access_token, user };
   },
   async handleOAuthCallback(provider: "github" | "google", code: string): Promise<{ access_token: string; token_type: string; user: User }> {
-    return request<{ access_token: string; token_type: string; user: User }>(`/${provider}/oauth/callback`, {
+    return request<{ access_token: string; token_type: string; user: User }>(`/api/${provider}/oauth/callback`, {
       query: { code },
       noAuth: true,
     });
@@ -191,22 +191,22 @@ export const api = {
 
   // ----------------------------------------------------------- GitHub OAuth
   async getGitHubAuthUrl(): Promise<{ authorization_url: string }> {
-    return request<{ authorization_url: string }>("/github/oauth/authorize");
+    return request<{ authorization_url: string }>("/api/github/oauth/authorize");
   },
   async listGitHubConnections(): Promise<GitHubConnection[]> {
-    return request<GitHubConnection[]>("/github/connections");
+    return request<GitHubConnection[]>("/api/github/connections");
   },
   async deleteGitHubConnection(connectionId: number): Promise<{ message: string }> {
-    return request<{ message: string }>(`/github/connections/${connectionId}`, {
+    return request<{ message: string }>(`/api/github/connections/${connectionId}`, {
       method: "DELETE",
     });
   },
   async listGitHubRepos(connectionId: number): Promise<GitHubRepo[]> {
-    return request<GitHubRepo[]>(`/github/connections/${connectionId}/repos`);
+    return request<GitHubRepo[]>(`/api/github/connections/${connectionId}/repos`);
   },
 
   // ----------------------------------------------------------- Google OAuth
   async getGoogleAuthUrl(): Promise<{ authorization_url: string }> {
-    return request<{ authorization_url: string }>("/google/oauth/authorize");
+    return request<{ authorization_url: string }>("/api/google/oauth/authorize");
   },
 };

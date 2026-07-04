@@ -10,20 +10,20 @@ from app.core.config import settings
 from app.core.security import create_access_token
 from app.models.user import User
 
-router = APIRouter()
+router = APIRouter(prefix="/api/google", tags=["google-oauth"])
 
 GOOGLE_OAUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
 
-@router.get("/google/oauth/authorize")
+@router.get("/oauth/authorize")
 async def google_oauth_authorize(request: Request):
     """Generate Google OAuth authorization URL."""
     if not settings.GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=500, detail="Google OAuth not configured")
     
-    redirect_uri = f"{request.url_for('google_oauth_callback')}"
+    redirect_uri = settings.GOOGLE_REDIRECT_URI
     scope = "openid email profile"
     
     auth_url = (
@@ -38,7 +38,7 @@ async def google_oauth_authorize(request: Request):
     return {"authorization_url": auth_url}
 
 
-@router.get("/google/oauth/callback")
+@router.get("/oauth/callback")
 async def google_oauth_callback(
     code: str,
     request: Request,
@@ -57,7 +57,7 @@ async def google_oauth_callback(
                 "client_secret": settings.GOOGLE_CLIENT_SECRET,
                 "code": code,
                 "grant_type": "authorization_code",
-                "redirect_uri": f"{request.url_for('google_oauth_callback')}",
+                "redirect_uri": settings.GOOGLE_REDIRECT_URI,
             },
         )
         token_resp.raise_for_status()
@@ -78,7 +78,7 @@ async def google_oauth_callback(
     
     # Check if user exists by email
     from sqlalchemy import select
-    from app.core.security import get_password_hash
+    from app.core.security import hash_password
     
     result = await db.execute(
         select(User).where(User.email == google_user["email"])
@@ -87,16 +87,26 @@ async def google_oauth_callback(
     
     if not user:
         # Create new user
-        user = User(
-            email=google_user["email"],
-            hashed_password=get_password_hash("oauth_user"),  # Placeholder password
-        )
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
+        try:
+            user = User(
+                email=google_user["email"],
+                hashed_password=hash_password("oauth_user"),  # Placeholder password
+            )
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+        except Exception:
+            # Handle race condition where user was created between check and insert
+            await db.rollback()
+            result = await db.execute(
+                select(User).where(User.email == google_user["email"])
+            )
+            user = result.scalar_one_or_none()
+            if not user:
+                raise
     
     # Generate JWT token
-    access_token_jwt = create_access_token(data={"sub": str(user.id)})
+    access_token_jwt = create_access_token(subject=str(user.id))
     
     return {
         "access_token": access_token_jwt,

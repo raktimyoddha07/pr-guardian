@@ -11,20 +11,20 @@ from app.core.security import create_access_token
 from app.models.github_connection import GitHubConnection
 from app.models.user import User
 
-router = APIRouter()
+router = APIRouter(prefix="/api/github", tags=["github-oauth"])
 
 GITHUB_OAUTH_URL = "https://github.com/login/oauth/authorize"
 GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
 GITHUB_API_URL = "https://api.github.com"
 
 
-@router.get("/github/oauth/authorize")
+@router.get("/oauth/authorize")
 async def github_oauth_authorize(request: Request):
     """Generate GitHub OAuth authorization URL."""
     if not settings.GITHUB_CLIENT_ID:
         raise HTTPException(status_code=500, detail="GitHub OAuth not configured")
     
-    redirect_uri = f"{request.url_for('github_oauth_callback')}"
+    redirect_uri = settings.GITHUB_REDIRECT_URI
     scope = "repo admin:org admin:public_key admin:repo_hook user"
     
     auth_url = (
@@ -37,7 +37,7 @@ async def github_oauth_authorize(request: Request):
     return {"authorization_url": auth_url}
 
 
-@router.get("/github/oauth/callback")
+@router.get("/oauth/callback")
 async def github_oauth_callback(
     code: str,
     request: Request,
@@ -74,33 +74,40 @@ async def github_oauth_callback(
         user_resp.raise_for_status()
         github_user = user_resp.json()
     
-    # Check if user exists by GitHub ID
+    # Check if user exists by GitHub ID (via existing connection) or email
     from sqlalchemy import select
-    from app.core.security import get_password_hash
+    from app.core.security import hash_password
     
-    result = await db.execute(
-        select(User).where(User.email == github_user.get("email"))
-    )
-    user = result.scalar_one_or_none()
-    
-    # Create user if doesn't exist
-    if not user:
-        user = User(
-            email=github_user.get("email") or f"{github_user['login']}@github.local",
-            hashed_password=get_password_hash("github_oauth"),
-        )
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
-    
-    # Check if connection already exists
+    # First check for existing GitHub connection
     result = await db.execute(
         select(GitHubConnection).where(
-            GitHubConnection.user_id == user.id,
-            GitHubConnection.github_user_id == github_user["id"],
+            GitHubConnection.github_user_id == github_user["id"]
         )
     )
     existing_connection = result.scalar_one_or_none()
+    
+    if existing_connection:
+        # Get the existing user
+        result = await db.execute(
+            select(User).where(User.id == existing_connection.user_id)
+        )
+        user = result.scalar_one_or_none()
+    else:
+        # No existing connection, check by email
+        result = await db.execute(
+            select(User).where(User.email == github_user.get("email"))
+        )
+        user = result.scalar_one_or_none()
+        
+        # Create user if doesn't exist
+        if not user:
+            user = User(
+                email=github_user.get("email") or f"{github_user['login']}@github.localdomain",
+                hashed_password=hash_password("github_oauth"),
+            )
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
     
     if existing_connection:
         # Update existing connection
@@ -124,7 +131,7 @@ async def github_oauth_callback(
     
     # Generate JWT token for auto-login
     from app.core.security import create_access_token
-    jwt_token = create_access_token(data={"sub": str(user.id)})
+    jwt_token = create_access_token(subject=str(user.id))
     
     return {
         "access_token": jwt_token,
@@ -137,7 +144,7 @@ async def github_oauth_callback(
     }
 
 
-@router.get("/github/connections")
+@router.get("/connections")
 async def list_github_connections(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -162,7 +169,7 @@ async def list_github_connections(
     ]
 
 
-@router.delete("/github/connections/{connection_id}")
+@router.delete("/connections/{connection_id}")
 async def delete_github_connection(
     connection_id: int,
     current_user: User = Depends(get_current_user),
@@ -188,7 +195,7 @@ async def delete_github_connection(
     return {"message": "Connection deleted successfully"}
 
 
-@router.get("/github/connections/{connection_id}/repos")
+@router.get("/connections/{connection_id}/repos")
 async def list_github_repos(
     connection_id: int,
     current_user: User = Depends(get_current_user),
