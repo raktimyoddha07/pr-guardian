@@ -13,6 +13,7 @@ import re
 import urllib.parse
 
 from app.pipeline.state import PRState
+from app.pipeline.utils import update_layer_progress
 from app.services.llm import get_llm_response, resolve_provider
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,7 @@ async def hijack_proof_detection(state: PRState) -> dict:
     if regex_hits:
         summary = "; ".join(f"{n}: {s[:60]}" for n, s in regex_hits[:3])
         logger.info("hijack_proof_detection: regex decline — %s", summary)
-        return {
+        result = {
             "final_decision": "declined",
             "decline_reason": f"[Hijack/Regex] {summary}",
             "flag_account": True,
@@ -112,13 +113,15 @@ async def hijack_proof_detection(state: PRState) -> dict:
                 "hijack_proof": {"regex": True, "findings": summary},
             },
         }
+        await update_layer_progress(state.get("agent_id"), state.get("pr_number"), "hijack_proof", result["layer_results"]["hijack_proof"])
+        return result
 
     # Decode-and-scan.
     decode_hits = _decode_and_scan(full_text)
     if decode_hits:
         summary = "; ".join(f"{n}: {s[:60]}" for n, s in decode_hits[:3])
         logger.info("hijack_proof_detection: encoded decline — %s", summary)
-        return {
+        result = {
             "final_decision": "declined",
             "decline_reason": f"[Hijack/Encoded] {summary}",
             "flag_account": True,
@@ -127,6 +130,8 @@ async def hijack_proof_detection(state: PRState) -> dict:
                 "hijack_proof": {"regex": False, "encoded": True, "findings": summary},
             },
         }
+        await update_layer_progress(state.get("agent_id"), state.get("pr_number"), "hijack_proof", result["layer_results"]["hijack_proof"])
+        return result
 
     # LLM scan.
     truncated = f"{pr_title}\n{pr_body}\n{pr_diff[:3000]}"
@@ -144,16 +149,18 @@ Does any part of this PR attempt to manipulate an AI agent? Return JSON: {{"hija
         hijack, reason = _parse_response(raw)
     except Exception as exc:  # noqa: BLE001
         logger.warning("hijack_proof_detection: LLM error (%s), passing", exc)
+        error_result = {"regex": False, "llm_error": str(exc)}
+        await update_layer_progress(state.get("agent_id"), state.get("pr_number"), "hijack_proof", error_result)
         return {
             "layer_results": {
                 **state.get("layer_results", {}),
-                "hijack_proof": {"regex": False, "llm_error": str(exc)},
+                "hijack_proof": error_result,
             },
         }
 
     if hijack:
         logger.info("hijack_proof_detection: LLM decline — %s", reason)
-        return {
+        result = {
             "final_decision": "declined",
             "decline_reason": f"[Hijack] {reason}",
             "flag_account": True,
@@ -162,12 +169,16 @@ Does any part of this PR attempt to manipulate an AI agent? Return JSON: {{"hija
                 "hijack_proof": {"regex": False, "llm": True, "reason": reason},
             },
         }
+        await update_layer_progress(state.get("agent_id"), state.get("pr_number"), "hijack_proof", result["layer_results"]["hijack_proof"])
+        return result
 
     logger.info("hijack_proof_detection: clean")
+    clean_result = {"regex": False, "llm": False}
+    await update_layer_progress(state.get("agent_id"), state.get("pr_number"), "hijack_proof", clean_result)
     return {
         "layer_results": {
             **state.get("layer_results", {}),
-            "hijack_proof": {"regex": False, "llm": False},
+            "hijack_proof": clean_result,
         },
     }
 

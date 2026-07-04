@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from app.pipeline.state import PRState
+from app.pipeline.utils import update_layer_progress
 from app.services.github import GithubError, github_client
 from app.services.llm import get_llm_response, resolve_provider
 from app.services.rag import retrieve_texts
@@ -94,6 +95,9 @@ Generate an improved title and description. Return JSON: {{"title": "...", "body
     except GithubError as exc:
         logger.warning("summary_layer: failed to update PR on GitHub (%s)", exc)
 
+    summary_result = {"title": new_title, "body_preview": (new_body or "")[:200]}
+    await update_layer_progress(state.get("agent_id"), state.get("pr_number"), "summary", summary_result)
+
     logger.info("summary_layer: approved PR #%s", pr_number)
     return {
         "final_decision": "approved",
@@ -101,7 +105,7 @@ Generate an improved title and description. Return JSON: {{"title": "...", "body
         "summary_body": new_body,
         "layer_results": {
             **state.get("layer_results", {}),
-            "summary": {"title": new_title, "body_preview": (new_body or "")[:200]},
+            "summary": summary_result,
         },
     }
 

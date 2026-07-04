@@ -3,9 +3,9 @@
 Flow (strict sequential gate — a PR that fails any of Layers 1–3 never reaches
 Layer 4):
 
-    START → spam → malicious → hijack → summary → approve → END
-                  │             │          │
-                  └─[decline]───┴──[decline]┘──► flag_account → decline → END
+    START → hijack → spam → malicious → summary → approve → END
+               │         │          │
+               └─[decline]─┴──[decline]┘──► flag_account → decline → END
 
 Each detection node returns ``final_decision = "declined"`` on a hit. The
 conditional edge after every layer checks that field; if declined it routes to
@@ -40,15 +40,15 @@ def _route_after_layer(state: PRState, *, next_node: str) -> str:
     return next_node
 
 
+def _after_hijack(state: PRState) -> str:
+    return _route_after_layer(state, next_node="spam")
+
+
 def _after_spam(state: PRState) -> str:
     return _route_after_layer(state, next_node="malicious_code")
 
 
 def _after_malicious(state: PRState) -> str:
-    return _route_after_layer(state, next_node="hijack_proof")
-
-
-def _after_hijack(state: PRState) -> str:
     return _route_after_layer(state, next_node="summary")
 
 
@@ -56,18 +56,18 @@ def build_pipeline():  # type: ignore[no-untyped-def]
     """Compile and return the runnable LangGraph pipeline."""
     graph = StateGraph(PRState)
 
+    graph.add_node("hijack_proof", hijack_proof_detection)
     graph.add_node("spam", spam_detection)
     graph.add_node("malicious_code", malicious_code_detection)
-    graph.add_node("hijack_proof", hijack_proof_detection)
     graph.add_node("summary", summary_layer)
     graph.add_node("flag_account", flag_account_node)
     graph.add_node("approve_pr", approve_pr)
     graph.add_node("decline_pr", decline_pr)
 
-    graph.add_edge(START, "spam")
+    graph.add_edge(START, "hijack_proof")
+    graph.add_conditional_edges("hijack_proof", _after_hijack)
     graph.add_conditional_edges("spam", _after_spam)
     graph.add_conditional_edges("malicious_code", _after_malicious)
-    graph.add_conditional_edges("hijack_proof", _after_hijack)
     graph.add_edge("summary", "approve_pr")
     graph.add_edge("flag_account", "decline_pr")
     graph.add_edge("approve_pr", END)

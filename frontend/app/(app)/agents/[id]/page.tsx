@@ -16,6 +16,24 @@ import {
 import { ApiError, api } from "@/lib/api";
 import type { Agent, PREvent } from "@/lib/types";
 
+interface PRProcessingStatus {
+  id: number;
+  agent_id: number;
+  pr_number: number;
+  pr_url: string;
+  pr_title: string;
+  author_github: string;
+  status: string;
+  layer_results: any;
+  final_decision: string | null;
+  decline_reason: string | null;
+  error_message: string | null;
+  detected_at: string | null;
+  queued_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
 export default function AgentDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -23,11 +41,13 @@ export default function AgentDetailPage() {
 
   const [agent, setAgent] = useState<Agent | null>(null);
   const [events, setEvents] = useState<PREvent[]>([]);
+  const [processingStatuses, setProcessingStatuses] = useState<PRProcessingStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toggling, setToggling] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const processingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadAgent = useCallback(async () => {
     try {
@@ -45,20 +65,51 @@ export default function AgentDetailPage() {
     }
   }, [agentId]);
 
+  const loadProcessingStatus = useCallback(async () => {
+    try {
+      const statuses = await api.listProcessingStatus({ agent_id: agentId, limit: 50 });
+      setProcessingStatuses(statuses);
+      
+      // Stop polling if all PRs are completed or failed
+      const allComplete = statuses.every(
+        s => s.status === "completed" || s.status === "failed"
+      );
+      if (allComplete && statuses.length > 0) {
+        if (processingPollRef.current) {
+          clearInterval(processingPollRef.current);
+          processingPollRef.current = null;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load processing status:", e);
+    }
+  }, [agentId]);
+
   async function load() {
     try {
-      const [a, evs] = await Promise.all([
+      const [a, evs, statuses] = await Promise.all([
         api.getAgent(agentId),
         api.listEvents({ agent_id: agentId, limit: 50 }),
+        api.listProcessingStatus({ agent_id: agentId, limit: 50 }),
       ]);
       setAgent(a);
       setEvents(evs);
+      setProcessingStatuses(statuses);
+      
       // If ingestion is running, start polling.
       if (
         a.ingestion_status === "running" ||
         a.ingestion_status === "pending"
       ) {
         pollRef.current = setInterval(() => void loadAgent(), 3000);
+      }
+      
+      // If there are PRs being processed, start polling for status
+      const hasProcessing = statuses.some(
+        s => s.status !== "completed" && s.status !== "failed"
+      );
+      if (hasProcessing) {
+        processingPollRef.current = setInterval(() => void loadProcessingStatus(), 2000);
       }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to load agent");
@@ -71,6 +122,7 @@ export default function AgentDetailPage() {
     void load();
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+      if (processingPollRef.current) clearInterval(processingPollRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId]);
@@ -231,9 +283,111 @@ export default function AgentDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>PR events</CardTitle>
+          <CardTitle>PR Processing Status</CardTitle>
           <CardDescription>
-            Pipeline decisions for this agent. Each PR runs through spam →
+            Real-time status of PRs being processed through the 4-layer pipeline.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {processingStatuses.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No PRs detected yet. The agent will automatically detect open PRs after ingestion completes.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {processingStatuses.map((status) => (
+                <div key={status.id} className="rounded-lg border p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={status.pr_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-medium text-primary underline"
+                        >
+                          #{status.pr_number}
+                        </a>
+                        <span className="text-sm text-muted-foreground">
+                          by {status.author_github}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground line-clamp-1">
+                        {status.pr_title}
+                      </p>
+                    </div>
+                    <Badge
+                      variant={
+                        status.status === "completed"
+                          ? "success"
+                          : status.status === "failed"
+                          ? "destructive"
+                          : status.status === "detected" || status.status === "queued"
+                          ? "secondary"
+                          : "default"
+                      }
+                    >
+                      {status.status}
+                    </Badge>
+                  </div>
+                  
+                  {status.status !== "detected" && status.status !== "queued" && (
+                    <div className="mt-3">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>Layers:</span>
+                        <span className={status.layer_results?.hijack_proof ? "text-green-600" : "text-muted-foreground"}>
+                          ✓ Hijack Proof
+                        </span>
+                        <span className={status.layer_results?.spam ? "text-green-600" : "text-muted-foreground"}>
+                          ✓ Spam
+                        </span>
+                        <span className={status.layer_results?.malicious_code ? "text-green-600" : "text-muted-foreground"}>
+                          ✓ Malicious Code
+                        </span>
+                        <span className={status.layer_results?.summary ? "text-green-600" : "text-muted-foreground"}>
+                          ✓ Summary
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {status.final_decision && (
+                    <div className="mt-2 text-sm">
+                      <span className="font-medium">Decision: </span>
+                      <Badge
+                        variant={status.final_decision === "approved" ? "success" : "destructive"}
+                      >
+                        {status.final_decision}
+                      </Badge>
+                      {status.decline_reason && (
+                        <span className="ml-2 text-muted-foreground">- {status.decline_reason}</span>
+                      )}
+                    </div>
+                  )}
+                  
+                  {status.error_message && (
+                    <div className="mt-2 text-sm text-destructive">
+                      Error: {status.error_message}
+                    </div>
+                  )}
+                  
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    Detected: {status.detected_at ? new Date(status.detected_at).toLocaleString() : "N/A"}
+                    {status.started_at && ` • Started: ${new Date(status.started_at).toLocaleString()}`}
+                    {status.completed_at && ` • Completed: ${new Date(status.completed_at).toLocaleString()}`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>PR Events History</CardTitle>
+          <CardDescription>
+            Completed pipeline decisions for this agent. Each PR runs through spam →
             malicious code → hijack-proof → summary layers.
           </CardDescription>
         </CardHeader>

@@ -20,3 +20,6 @@ celery_app.conf.update(
     task_soft_time_limit=25 * 60,  # 25 minutes
     worker_prefetch_multiplier=1,
 )
+
+# Import tasks to register them with Celery
+from app import tasks  # noqa: F401

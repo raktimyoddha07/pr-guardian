@@ -55,6 +55,7 @@ async def create_agent(
     await db.refresh(agent)
 
     # Kick off ingestion in Celery worker; status is tracked on the agent row.
+    # This will also automatically trigger pending PR processing after ingestion completes.
     sync_all_agents_task.delay()
     return agent
 

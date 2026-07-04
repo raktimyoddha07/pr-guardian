@@ -10,6 +10,7 @@ import logging
 import re
 
 from app.pipeline.state import PRState
+from app.pipeline.utils import update_layer_progress
 from app.services.llm import get_llm_response, resolve_provider
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ async def malicious_code_detection(state: PRState) -> dict:
             f"{fname}: {pat}" for fname, pat, _ in static_hits[:5]
         )
         logger.info("malicious_code_detection: static decline — %s", hit_summary)
-        return {
+        result = {
             "final_decision": "declined",
             "decline_reason": f"[Malicious Code/Static] {hit_summary}",
             "flag_account": True,
@@ -99,6 +100,8 @@ async def malicious_code_detection(state: PRState) -> dict:
                 "malicious_code": {"static": True, "findings": hit_summary},
             },
         }
+        await update_layer_progress(state.get("agent_id"), state.get("pr_number"), "malicious_code", result["layer_results"]["malicious_code"])
+        return result
 
     # Phase 2: LLM scan on high-risk hunks (or full diff if short enough).
     # Include PR title and body for additional context
@@ -123,16 +126,18 @@ Analyze this PR for malicious code patterns. Return JSON: {{"malicious": true/fa
         malicious, reason = _parse_response(raw)
     except Exception as exc:  # noqa: BLE001
         logger.warning("malicious_code_detection: LLM error (%s), passing", exc)
+        error_result = {"static": False, "llm_error": str(exc)}
+        await update_layer_progress(state.get("agent_id"), state.get("pr_number"), "malicious_code", error_result)
         return {
             "layer_results": {
                 **state.get("layer_results", {}),
-                "malicious_code": {"static": False, "llm_error": str(exc)},
+                "malicious_code": error_result,
             },
         }
 
     if malicious:
         logger.info("malicious_code_detection: LLM decline — %s", reason)
-        return {
+        result = {
             "final_decision": "declined",
             "decline_reason": f"[Malicious Code] {reason}",
             "flag_account": True,
@@ -141,12 +146,16 @@ Analyze this PR for malicious code patterns. Return JSON: {{"malicious": true/fa
                 "malicious_code": {"static": False, "llm": True, "reason": reason},
             },
         }
+        await update_layer_progress(state.get("agent_id"), state.get("pr_number"), "malicious_code", result["layer_results"]["malicious_code"])
+        return result
 
     logger.info("malicious_code_detection: clean")
+    clean_result = {"static": False, "llm": False}
+    await update_layer_progress(state.get("agent_id"), state.get("pr_number"), "malicious_code", clean_result)
     return {
         "layer_results": {
             **state.get("layer_results", {}),
-            "malicious_code": {"static": False, "llm": False},
+            "malicious_code": clean_result,
         },
     }
 

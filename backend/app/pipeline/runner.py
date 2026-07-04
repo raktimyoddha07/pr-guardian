@@ -18,6 +18,7 @@ from app.core.metrics import inc_counter, observe_histogram
 from app.models.agent import Agent
 from app.models.github_account import GithubAccount
 from app.models.pr_event import PREvent
+from app.models.pr_processing_status import PRProcessingStatus
 from app.pipeline.graph import pipeline
 from app.pipeline.state import PRState
 from app.services.github import GithubError, github_client
@@ -79,10 +80,57 @@ async def _record_error(agent_id: int, pr_number: int, pr_url: str, author: str,
                 reason=f"Pipeline error: {msg[:500]}",
             )
         )
+        # Also update processing status
+        status = await db.scalar(
+            select(PRProcessingStatus).where(
+                PRProcessingStatus.agent_id == agent_id,
+                PRProcessingStatus.pr_number == pr_number
+            )
+        )
+        if status:
+            status.status = "failed"
+            status.error_message = msg[:500]
+            status.completed_at = datetime.now(timezone.utc)
         await db.commit()
 
 
-async def run_pipeline(repo_full_name: str, pr_number: int, pr_url: str, author: str) -> dict:
+async def _update_processing_status(
+    agent_id: int,
+    pr_number: int,
+    status: str,
+    layer_results: dict | None = None,
+    final_decision: str | None = None,
+    decline_reason: str | None = None
+) -> None:
+    """Update the PR processing status in the database."""
+    async with AsyncSessionLocal() as db:
+        processing_status = await db.scalar(
+            select(PRProcessingStatus).where(
+                PRProcessingStatus.agent_id == agent_id,
+                PRProcessingStatus.pr_number == pr_number
+            )
+        )
+        if processing_status:
+            processing_status.status = status
+            if layer_results is not None:
+                processing_status.layer_results = layer_results
+            if final_decision is not None:
+                processing_status.final_decision = final_decision
+            if decline_reason is not None:
+                processing_status.decline_reason = decline_reason
+            
+            if status == "queued":
+                processing_status.queued_at = datetime.now(timezone.utc)
+            elif status in ("spam_check", "malicious_code_check", "hijack_proof_check", "summary_generation"):
+                if processing_status.started_at is None:
+                    processing_status.started_at = datetime.now(timezone.utc)
+            elif status in ("completed", "failed"):
+                processing_status.completed_at = datetime.now(timezone.utc)
+            
+            await db.commit()
+
+
+async def run_pipeline(repo_full_name: str, pr_number: int, pr_url: str, author: str, pr_title: str = "", pr_body: str = "") -> dict:
     """Run the full pipeline for a PR. Returns the final state dict.
 
     Designed to be called as a background task from the webhook. Never raises
@@ -97,7 +145,34 @@ async def run_pipeline(repo_full_name: str, pr_number: int, pr_url: str, author:
         logger.info("run_pipeline: no agent owns %s, ignoring", repo_full_name)
         return {"status": "ignored", "reason": "no agent owns repo"}
 
+    # Create or update processing status entry
+    async with AsyncSessionLocal() as db:
+        existing_status = await db.scalar(
+            select(PRProcessingStatus).where(
+                PRProcessingStatus.agent_id == agent.id,
+                PRProcessingStatus.pr_number == pr_number
+            )
+        )
+        if not existing_status:
+            processing_status = PRProcessingStatus(
+                agent_id=agent.id,
+                pr_number=pr_number,
+                pr_url=pr_url,
+                pr_title=pr_title,
+                author_github=author,
+                status="queued"
+            )
+            db.add(processing_status)
+            await db.commit()
+        else:
+            await _update_processing_status(agent.id, pr_number, "queued")
+
     title, body, diff = await _fetch_pr(repo_full_name, pr_number)
+    if not title and pr_title:
+        title = pr_title
+    if not body and pr_body:
+        body = pr_body
+    
     flag_count, is_banned = await _get_author_flags(author)
 
     state: PRState = {
@@ -122,12 +197,24 @@ async def run_pipeline(repo_full_name: str, pr_number: int, pr_url: str, author:
     }
 
     try:
+        await _update_processing_status(agent.id, pr_number, "hijack_proof_check")
         final_state = await pipeline.ainvoke(state)
         decision = final_state.get("final_decision", "approved")
         elapsed = time.monotonic() - t0
         observe_histogram("pipeline_duration_seconds", elapsed)
         inc_counter("pipeline_decisions_total", labels={"decision": decision})
         inc_counter("pipeline_layer_hits_total", labels={"layer": decision})
+        
+        # Update final status
+        await _update_processing_status(
+            agent.id,
+            pr_number,
+            "completed",
+            layer_results=final_state.get("layer_results", {}),
+            final_decision=decision,
+            decline_reason=final_state.get("decline_reason")
+        )
+        
         logger.info(
             "run_pipeline: done PR #%s decision=%s reason=%s in %.2fs",
             pr_number,

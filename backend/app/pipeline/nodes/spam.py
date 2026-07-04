@@ -9,6 +9,7 @@ import logging
 import re
 
 from app.pipeline.state import PRState
+from app.pipeline.utils import update_layer_progress
 from app.services.llm import get_llm_response, resolve_provider
 from app.services.rag import retrieve_texts
 
@@ -80,12 +81,14 @@ async def spam_detection(state: PRState) -> dict:
     author_is_banned = state.get("author_is_banned", False)
     if author_is_banned:
         logger.info("spam_detection: author is banned, auto-declining")
-        return {
+        result = {
             "final_decision": "declined",
             "decline_reason": "[Spam] Author is banned from this repository",
             "flag_account": True,
             "layer_results": {**state.get("layer_results", {}), "spam": {"score": 1.0, "reason": "Author is banned"}},
         }
+        await update_layer_progress(state.get("agent_id"), state.get("pr_number"), "spam", result["layer_results"]["spam"])
+        return result
 
     # Check if author has flags - lower threshold for decline
     author_flag_count = state.get("author_flag_count", 0)
@@ -102,12 +105,14 @@ async def spam_detection(state: PRState) -> dict:
     is_spam, reason = _heuristic_spam_check(state)
     if is_spam:
         logger.info("spam_detection: heuristic decline — %s", reason)
-        return {
+        result = {
             "final_decision": "declined",
             "decline_reason": f"[Spam/Heuristic] {reason}",
             "flag_account": True,
             "layer_results": {**state.get("layer_results", {}), "spam": {"score": 1.0, "reason": reason}},
         }
+        await update_layer_progress(state.get("agent_id"), state.get("pr_number"), "spam", result["layer_results"]["spam"])
+        return result
 
     # RAG retrieval for context.
     agent = state.get("agent")
@@ -144,6 +149,9 @@ Score this PR's spam/uselessness likelihood. Return JSON: {{"score": 0.0-1.0, "r
         logger.warning("spam_detection: LLM error (%s), passing", exc)
         score, llm_reason = 0.0, f"LLM error: {exc}"
 
+    spam_result = {"score": score, "reason": llm_reason}
+    await update_layer_progress(state.get("agent_id"), state.get("pr_number"), "spam", spam_result)
+
     if score > adjusted_threshold:
         logger.info("spam_detection: LLM decline — score=%.2f threshold=%.2f reason=%s", 
                     score, adjusted_threshold, llm_reason)
@@ -151,13 +159,13 @@ Score this PR's spam/uselessness likelihood. Return JSON: {{"score": 0.0-1.0, "r
             "final_decision": "declined",
             "decline_reason": f"[Spam] Score {score:.2f}: {llm_reason}",
             "flag_account": True,
-            "layer_results": {**state.get("layer_results", {}), "spam": {"score": score, "reason": llm_reason}},
+            "layer_results": {**state.get("layer_results", {}), "spam": spam_result},
         }
 
     logger.info("spam_detection: clean — score=%.2f", score)
     return {
         "retrieved_context": context_chunks,
-        "layer_results": {**state.get("layer_results", {}), "spam": {"score": score, "reason": llm_reason}},
+        "layer_results": {**state.get("layer_results", {}), "spam": spam_result},
     }
 
 

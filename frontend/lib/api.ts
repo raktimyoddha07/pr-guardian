@@ -173,6 +173,12 @@ export const api = {
   } = {}): Promise<PREvent[]> {
     return request<PREvent[]>("/api/events", { query: params });
   },
+  async listProcessingStatus(params: {
+    agent_id?: number;
+    limit?: number;
+  } = {}): Promise<any[]> {
+    return request<any[]>("/api/events/processing-status", { query: params });
+  },
 
   // ----------------------------------------------------------- dashboard
   async getStats(agentId?: number): Promise<DashboardStats> {

@@ -4,6 +4,7 @@ from app.models.github_account import GithubAccount
 from app.models.github_connection import GitHubConnection
 from app.models.knowledge_chunk import HAS_PGVECTOR, KnowledgeChunk
 from app.models.pr_event import PREvent
+from app.models.pr_processing_status import PRProcessingStatus
 from app.models.user import User
 
 __all__ = [
@@ -12,6 +13,7 @@ __all__ = [
     "GithubAccount",
     "GitHubConnection",
     "PREvent",
+    "PRProcessingStatus",
     "KnowledgeChunk",
     "HAS_PGVECTOR",
 ]
