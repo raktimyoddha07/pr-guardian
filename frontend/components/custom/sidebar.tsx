@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { api, clearToken } from "@/lib/api";
 import type { GitHubConnection, User } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { useTheme } from "@/components/custom/theme-provider";
 import { 
   LayoutDashboard, 
   GitBranch, 
@@ -15,11 +16,15 @@ import {
   ChevronDown,
   ChevronRight,
   User as UserIcon,
-  Settings
+  Settings,
+  Moon,
+  Sun,
+  Monitor
 } from "lucide-react";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { theme, setTheme } = useTheme();
   const [connections, setConnections] = useState<GitHubConnection[]>([]);
   const [showConnections, setShowConnections] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -117,6 +122,42 @@ export function Sidebar() {
             );
           })}
         </ul>
+
+        {/* Theme Toggle */}
+        <div className="mt-6 pt-6 border-t">
+          <div className="flex items-center justify-between px-3 py-2">
+            <span className="text-sm font-medium text-muted-foreground">Theme</span>
+            <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+              <button
+                onClick={() => setTheme("light")}
+                className={`p-1.5 rounded-md transition-colors ${
+                  theme === "light" ? "bg-background shadow-sm" : "hover:bg-background/50"
+                }`}
+                title="Light"
+              >
+                <Sun className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setTheme("dark")}
+                className={`p-1.5 rounded-md transition-colors ${
+                  theme === "dark" ? "bg-background shadow-sm" : "hover:bg-background/50"
+                }`}
+                title="Dark"
+              >
+                <Moon className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setTheme("system")}
+                className={`p-1.5 rounded-md transition-colors ${
+                  theme === "system" ? "bg-background shadow-sm" : "hover:bg-background/50"
+                }`}
+                title="System"
+              >
+                <Monitor className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
 
         {/* GitHub Connections */}
         <div className="mt-8">

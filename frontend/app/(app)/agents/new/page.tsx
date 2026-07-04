@@ -187,11 +187,9 @@ export default function NewAgentPage() {
                     <SelectContent>
                       {repos.map((repo) => (
                         <SelectItem key={repo.full_name} value={repo.full_name}>
-                          <div className="flex flex-col">
-                            <span>{repo.name}</span>
-                            <span className="text-xs text-muted-foreground">
-                              {repo.owner}/{repo.name}
-                            </span>
+                          <div className="flex items-center gap-2">
+                            <Github className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-medium">{repo.full_name}</span>
                           </div>
                         </SelectItem>
                       ))}

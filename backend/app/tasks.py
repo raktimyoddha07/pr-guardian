@@ -4,7 +4,7 @@ from app.pipeline.runner import run_pipeline
 
 
 @celery_app.task(name="process_pr")
-def process_pr_task(repo_full_name: str, pr_number: int, pr_url: str, author: str):
+def process_pr_task(repo_full_name: str, pr_number: int, pr_url: str, author: str, pr_title: str = "", pr_body: str = ""):
     """Process a PR through the LangGraph pipeline."""
     import asyncio
     from app.core.database import AsyncSessionLocal
