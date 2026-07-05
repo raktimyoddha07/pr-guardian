@@ -361,11 +361,11 @@ export default function PRDetailPage() {
                 <p className="text-sm bg-secondary p-2 rounded">{layerResults.summary.title}</p>
               </div>
             )}
-            {layerResults.summary.body_preview && (
+            {(layerResults.summary.body || layerResults.summary.body_preview) && (
               <div>
-                <p className="font-medium mb-1">Body Preview:</p>
+                <p className="font-medium mb-1">Generated Body:</p>
                 <p className="text-sm bg-secondary p-2 rounded whitespace-pre-wrap">
-                  {layerResults.summary.body_preview}
+                  {layerResults.summary.body || layerResults.summary.body_preview}
                 </p>
               </div>
             )}

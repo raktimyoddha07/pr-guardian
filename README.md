@@ -5,16 +5,26 @@
 PR Guardian is a RAG-powered GitHub Pull Request management system. Users connect their GitHub accounts via OAuth (GitHub or Google), then create agents tied to specific repositories. Each agent ingests the full repo and its issues as a knowledge base using hybrid BM25 + vector search, then autonomously reviews incoming PRs through a multi-layer agentic pipeline — declining dangerous PRs (and closing them) and polishing clean ones before they ever reach a human reviewer.
 
 **Key Features:**
-- **Multi-layer PR Review Pipeline**: Prompt injection detection (OWASP LLM01), spam detection, malicious code scanning, and PR summarization
+- **Multi-layer PR Review Pipeline**: Prompt injection detection (12 specific categories), spam detection, malicious code scanning, and PR summarization
 - **Enterprise-Grade Security**: Comprehensive prompt injection detection based on MITRE ATLAS and OWASP Top 10 for LLM Applications
 - **Automatic PR Polling**: 5-second polling detects new PRs without relying solely on webhooks
 - **Automatic Recovery**: Self-healing system detects and retries stuck PRs at any layer
 - **RAG-powered Context**: Hybrid BM25 + vector search retrieves relevant code and issues for informed decisions
 - **Account Flagging System**: Tracks problematic contributors with automatic bans and manual override capability
 - **Cautious Mode for Flagged Accounts**: Lowered thresholds for users with previous flags
-- **Background Processing**: Redis+Celery for reliable async PR processing
+- **Background Processing**: Redis+Celery for reliable async PR processing with isolated connection pools
 - **Modern Dashboard**: Professional UI with real-time stats, event logs, and account management
 - **OAuth Authentication**: Secure GitHub and Google OAuth integration
+
+## 📑 Table of Contents
+
+- [How to Use](#-how-to-use)
+- [How it Works](#-how-it-works)
+- [Tech Stack](#-tech-stack)
+- [Setup & Installation](#-setup--installation)
+- [API Endpoints](#-api-endpoints)
+- [Project Structure](#-project-structure)
+- [Exports](#-exports)
 
 ## 🚀 How to Use
 
@@ -36,7 +46,7 @@ View all flagged GitHub accounts with their flag counts and status. If the AI in
 **6. Manage Agents**
 Pause, resume, or delete agents. Edit LLM provider settings. Trigger manual knowledge-base re-syncs from the agent settings page.
 
-## 🧠 Implementation Process
+## 🧠 How it Works
 
 ### System Architecture
 
@@ -81,45 +91,49 @@ flowchart TD
 ### Key Algorithms & Logic
 
 **Prompt Injection Detection (Layer 1 - OWASP LLM01):**
-- Direct injection patterns: instruction override, persona jailbreak, obfuscated payload, system prompt extraction
-- Indirect injection patterns: web-page injection, search-result injection, email/document injection, business record injection
-- Agentic attack patterns: tool-call hijacking, connector exfiltration, cross-step contamination, excessive agency abuse
-- Security bypass detection: override/bypass safety, auto-approve instructions, reviewer manipulation
-- Regex pattern library with 20+ patterns based on MITRE ATLAS and OWASP Top 10 for LLM Applications
-- Decode-and-scan: base64 and URL-decoded strings are re-scanned against high-signal patterns
-- LLM analysis with injection-resistant system prompt — all untrusted content wrapped in `<pr_content>` XML delimiters
-- Any detection → immediate decline + flag (no LLM needed for regex hits)
+- Detects 12 specific attack categories across 3 groups:
+  - Direct Injection: Instruction Override, Persona Jailbreak, Obfuscated Payload, System-Prompt Extraction
+  - Indirect Injection: Web-Page Injection, Search-Result Injection, Email/Document Injection, Business-Record Injection
+  - Agentic Attacks: Tool-Call Hijacking, Connector-Based Exfiltration, Cross-Step Contamination, Excessive-Agency Abuse
+- Regex pattern library with 20+ patterns based on MITRE ATLAS and OWASP Top 10
+- Decode-and-scan: base64 and URL-decoded strings are re-scanned
+- LLM analysis with injection-resistant system prompt — all untrusted content wrapped in XML delimiters
+- Displays specific category when detected (e.g., `[Prompt Injection] Instruction Override`)
+- Any detection → immediate decline + flag
 
 **Spam Detection (Layer 2):**
-- Heuristic pre-checks: empty body with no linked issue, trivial diff (< 5 changed lines), bot-like regex patterns (promo links, crypto spam)
-- Hybrid RAG retrieval (BM25 + vector search) using PR title + first 500 chars of diff as query against the knowledge base
+- Heuristic pre-checks: empty body with no linked issue, whitespace-only changes, bot-like patterns
+- Hybrid RAG retrieval (BM25 + vector search) using PR title + diff as query
 - LLM scoring 0.0–1.0 with repository context; threshold > 0.75 → decline
-- Belt-and-suspenders: either heuristic OR LLM triggers a decline
+- Less strict: small meaningful diffs are allowed, LLM decides significance
+- Either heuristic OR LLM triggers a decline
 
 **Malicious Code Detection (Layer 3):**
-- Static regex scan of the diff: `eval()`, `exec()`, `subprocess`, `os.system`, `base64.b64decode`, hardcoded IPs, secret exfiltration patterns, reverse shells, keyloggers, pickle deserialization, ctypes shellcode
-- High-risk hunks sent to the LLM for deeper analysis
-- Either static scan OR LLM detection → decline (no consensus required)
+- Static regex scan: `eval()`, `exec()`, `subprocess`, `os.system`, `base64.b64decode`, hardcoded IPs, secret exfiltration, reverse shells, keyloggers, pickle deserialization, ctypes shellcode
+- High-risk hunks sent to LLM for deeper analysis
+- Either static scan OR LLM detection → decline
 
 **Summary Layer (Layer 4):**
-- Hybrid RAG retrieves top-8 chunks from issues and code similar to the diff
-- LLM generates conventional-commits title (`feat|fix|refactor|...`) and structured description (what changed, why, linked issues, impact)
-- Updated title and body posted back to the GitHub PR via API
+- Hybrid RAG retrieves top-8 chunks from issues and code
+- LLM generates conventional-commits title and structured description
+- Updated title and body posted back to GitHub PR via API
+- Full generated body is stored and displayed in the dashboard
 
 **Account Flagging:**
-- Every declined PR increments `flag_count` on the `GithubAccount` model
-- At `flag_count >= 3`, the account is auto-banned
-- Users can manually remove flags via a dashboard button if the AI was wrong
+- Every declined PR increments `flag_count` on `GithubAccount` model
+- At `flag_count >= 3`, account is auto-banned
+- Users can manually remove flags via dashboard
 - Flagged accounts have lowered spam detection thresholds (0.1 reduction per flag, minimum 0.3)
-- Banned accounts are auto-declined without running the full pipeline
+- Banned accounts are auto-declined without running full pipeline
 
-**Hardening (Phase 5):**
-- All external API calls wrapped with exponential backoff retry (3 attempts, 0.5s base, 8s max, jitter)
+**System Reliability:**
+- All external API calls wrapped with exponential backoff retry (3 attempts)
 - Webhook rejects payloads exceeding 500KB
-- Per-account rate limit: >10 PRs/hour → auto-flag without running the pipeline
-- Prometheus-style metrics at `/metrics` (pipeline runs, decisions, duration histograms)
-- **Automatic PR Polling**: Celery Beat polls GitHub every 5 seconds for new PRs across all active agents
-- **Automatic Recovery System**: Detects and retries stuck PRs at any layer (failed, stuck at intermediate layers, stuck at queued, legacy detected status) with 5-second intervals and 3-retry limit
+- Per-account rate limit: >10 PRs/hour → auto-flag
+- Prometheus-style metrics at `/metrics`
+- Automatic PR Polling: Celery Beat polls GitHub every 5 seconds
+- Automatic Recovery: Detects and retries stuck PRs at any layer with 3-retry limit
+- Isolated worker DB connection pools (pool_size=2, max_overflow=5) to prevent connection exhaustion
 
 ## 🛠 Tech Stack
 

@@ -97,7 +97,7 @@ Generate an improved title and description. Return JSON: {{"title": "...", "body
     except GithubError as exc:
         logger.warning("summary_layer: failed to update PR on GitHub (%s)", exc)
 
-    summary_result = {"title": new_title, "body_preview": (new_body or "")[:200]}
+    summary_result = {"title": new_title, "body": new_body}
     await update_layer_progress(state.get("agent_id"), state.get("pr_number"), "summary", summary_result)
 
     logger.info("summary_layer: approved PR #%s", pr_number)
