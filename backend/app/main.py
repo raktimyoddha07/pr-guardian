@@ -128,7 +128,7 @@ async def _startup_scan() -> None:
 async def lifespan(app: FastAPI):
     _configure_logging()
     logger.info("startup: %s starting", settings.APP_NAME)
-    logger.info("startup: CORS origins = %s", settings.BACKEND_CORS_ORIGINS)
+    logger.info("startup: CORS origins = %s", settings.parse_cors_origins())
     
     # Essential startup tasks — must finish before serving.
     await _try_enable_pgvector()
@@ -156,7 +156,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=settings.parse_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

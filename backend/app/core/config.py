@@ -4,7 +4,7 @@ from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import Field, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,28 +43,23 @@ class Settings(BaseSettings):
     APP_NAME: str = "PR Guardian"
     API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = False
-    BACKEND_CORS_ORIGINS: list[str] = Field(
-        default_factory=lambda: ["http://localhost:3000"]
-    )
+    # Stored as a raw string to avoid pydantic-settings' built-in JSON decoder
+    # (which runs before field validators and crashes on non-JSON strings).
+    # Use parse_cors_origins() to get the list.
+    BACKEND_CORS_ORIGINS: str = '["http://localhost:3000"]'
 
-    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
-    @classmethod
-    def _parse_cors_origins(cls, v: object) -> list[str]:
-        if isinstance(v, list):
-            return v
-        if isinstance(v, str):
-            v = v.strip()
-            # Try JSON array first
-            if v.startswith("["):
-                try:
-                    parsed = json.loads(v)
-                    if isinstance(parsed, list):
-                        return parsed
-                except json.JSONDecodeError:
-                    pass
-            # Fallback: split by comma
-            return [origin.strip().strip('"').strip("'") for origin in v.split(",") if origin.strip()]
-        return ["http://localhost:3000"]
+    def parse_cors_origins(self) -> list[str]:
+        v = self.BACKEND_CORS_ORIGINS.strip()
+        if not v:
+            return ["http://localhost:3000"]
+        if v.startswith("["):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+        return [o.strip().strip("\"'") for o in v.split(",") if o.strip()]
 
     # Database
     DATABASE_URL: str = (
