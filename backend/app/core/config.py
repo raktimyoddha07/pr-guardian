@@ -1,9 +1,33 @@
 """Application configuration via pydantic-settings."""
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _normalize_db_url(url: str) -> str:
+    """Coerce a Postgres URL to the async asyncpg driver and drop libpq-only params.
+
+    Managed providers (Neon, Render, Supabase) hand out ``postgresql://…?sslmode=require``
+    which SQLAlchemy routes to the *sync* psycopg2 driver, and asyncpg rejects the
+    ``sslmode`` / ``channel_binding`` query params. Rewrite the scheme to
+    ``postgresql+asyncpg`` and strip those params so pasting the raw string works.
+    """
+    if not url:
+        return url
+    parts = urlsplit(url)
+    scheme = parts.scheme
+    if scheme in ("postgres", "postgresql", "postgresql+psycopg2", "postgresql+psycopg"):
+        scheme = "postgresql+asyncpg"
+    if scheme != "postgresql+asyncpg":
+        return url  # sqlite / already-custom driver → leave as-is
+    keep = [
+        kv for kv in parts.query.split("&")
+        if kv and kv.split("=", 1)[0] not in ("sslmode", "channel_binding")
+    ]
+    return urlunsplit((scheme, parts.netloc, parts.path, "&".join(keep), parts.fragment))
 
 
 class Settings(BaseSettings):
@@ -26,6 +50,12 @@ class Settings(BaseSettings):
     DATABASE_URL: str = (
         "postgresql+asyncpg://postgres:postgres@localhost:5432/prguardian"
     )
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def _fix_db_url(cls, v: str) -> str:
+        return _normalize_db_url(v)
+
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 20
     # Worker-specific pool settings (separate from main app)
