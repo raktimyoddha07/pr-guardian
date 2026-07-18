@@ -105,12 +105,6 @@ async def _startup_scan() -> None:
     from app.tasks import process_pr
 
     try:
-        from app.services.embeddings import embeddings_available
-        embeddings_available()  # trigger lazy model load off the request path
-    except Exception:  # noqa: BLE001
-        pass
-
-    try:
         async with async_session_maker() as db:
             agents = (await db.execute(select(Agent).where(Agent.is_active == True))).scalars().all()
             for agent in agents:

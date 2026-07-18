@@ -1,18 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { api, clearToken } from "@/lib/api";
 import type { GitHubConnection, User } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/components/custom/theme-provider";
+import { isDemoMode, exitDemoMode } from "@/components/custom/auth-guard";
 import {
   LayoutDashboard,
   GitBranch,
   Shield,
   Plus,
   Github,
+  LogIn,
   LogOut,
   ChevronDown,
   ChevronRight,
@@ -25,14 +27,17 @@ import {
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { theme, setTheme } = useTheme();
   const [connections, setConnections] = useState<GitHubConnection[]>([]);
   const [showConnections, setShowConnections] = useState(false);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [userLoading, setUserLoading] = useState(true);
+  const [demo, setDemo] = useState(false);
 
   useEffect(() => {
+    setDemo(isDemoMode());
     loadConnections();
     loadUser();
   }, []);
@@ -244,20 +249,37 @@ export function Sidebar() {
               <div className="h-4 w-24 bg-muted animate-pulse rounded" />
             ) : user ? (
               <p className="text-sm font-medium truncate">{user.email}</p>
+            ) : demo ? (
+              <div>
+                <p className="text-sm font-medium">Demo Mode</p>
+                <p className="text-xs text-muted-foreground">Browsing as guest</p>
+              </div>
             ) : (
               <p className="text-sm text-muted-foreground">Not logged in</p>
             )}
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full justify-start text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-          onClick={handleLogout}
-        >
-          <LogOut className="h-4 w-4 mr-2" />
-          Sign Out
-        </Button>
+        {demo ? (
+          <Button
+            variant="default"
+            size="sm"
+            className="w-full justify-center"
+            onClick={() => { exitDemoMode(); router.push("/login"); }}
+          >
+            <LogIn className="h-4 w-4 mr-2" />
+            Sign in
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            onClick={handleLogout}
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Sign Out
+          </Button>
+        )}
       </div>
     </aside>
   );

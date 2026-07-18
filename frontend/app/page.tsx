@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ShieldCheck,
   Bot,
@@ -16,8 +17,10 @@ import {
   Moon,
   Sun,
   Check,
+  Eye,
 } from "lucide-react";
 import { useTheme } from "@/components/custom/theme-provider";
+import { enterDemoMode } from "@/components/custom/auth-guard";
 
 function ThemeToggle() {
   const { theme, setTheme } = useTheme();
@@ -78,6 +81,13 @@ const PIPELINE = [
 const PROVIDERS = ["Groq", "Google Gemini", "Ollama", "GitHub"];
 
 export default function LandingPage() {
+  const router = useRouter();
+
+  function handleTryDemo() {
+    enterDemoMode();
+    router.push("/dashboard");
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Nav */}
@@ -96,6 +106,13 @@ export default function LandingPage() {
           </nav>
           <div className="flex items-center gap-2">
             <ThemeToggle />
+            <button
+              onClick={handleTryDemo}
+              className="hidden rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline-flex items-center gap-1.5"
+            >
+              <Eye className="h-4 w-4" />
+              Try demo
+            </button>
             <Link
               href="/login"
               className="hidden rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline-block"
@@ -143,6 +160,13 @@ export default function LandingPage() {
               Start guarding your repos
               <ArrowRight className="h-4 w-4" />
             </Link>
+            <button
+              onClick={handleTryDemo}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-card px-6 py-3 text-sm font-semibold transition-colors hover:bg-muted sm:w-auto"
+            >
+              <Eye className="h-4 w-4" />
+              Try demo
+            </button>
             <Link
               href="/login"
               className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-card px-6 py-3 text-sm font-semibold transition-colors hover:bg-muted sm:w-auto"
