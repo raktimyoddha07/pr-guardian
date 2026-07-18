@@ -34,11 +34,7 @@ export function exitDemoMode(): void {
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useSession();
   const router = useRouter();
-  const [demo, setDemo] = useState(false);
-
-  useEffect(() => {
-    setDemo(isDemoMode());
-  }, []);
+  const demo = isDemoMode();
 
   useEffect(() => {
     if (!loading && !user && !demo) {

@@ -91,9 +91,12 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   });
 
   if (res.status === 401 && !noAuth) {
-    clearToken();
-    if (typeof window !== "undefined" && window.location.pathname !== "/login") {
-      window.location.href = "/login";
+    const isDemo = typeof window !== "undefined" && window.localStorage.getItem("prguardian.demo") === "true";
+    if (!isDemo) {
+      clearToken();
+      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
     }
   }
 
