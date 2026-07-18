@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
@@ -20,7 +21,7 @@ GITHUB_API_URL = "https://api.github.com"
 
 @router.get("/oauth/authorize")
 async def github_oauth_authorize(request: Request):
-    """Generate GitHub OAuth authorization URL."""
+    """Redirect to GitHub OAuth consent page."""
     if not settings.GITHUB_CLIENT_ID:
         raise HTTPException(status_code=500, detail="GitHub OAuth not configured")
     
@@ -34,7 +35,7 @@ async def github_oauth_authorize(request: Request):
         f"&scope={scope}"
     )
     
-    return {"authorization_url": auth_url}
+    return RedirectResponse(url=auth_url)
 
 
 @router.get("/oauth/callback")

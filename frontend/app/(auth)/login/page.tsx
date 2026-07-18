@@ -16,7 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { ApiError, api } from "@/lib/api";
+import { ApiError, api, API_BASE_URL } from "@/lib/api";
 import { Github, Chrome } from "lucide-react";
 
 function LoginForm() {
@@ -28,7 +28,6 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [oauthLoading, setOauthLoading] = useState<"github" | "google" | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -45,26 +44,12 @@ function LoginForm() {
     }
   }
 
-  async function handleGitHubLogin() {
-    setOauthLoading("github");
-    try {
-      const { authorization_url } = await api.getGitHubAuthUrl();
-      window.location.href = authorization_url;
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "GitHub login failed");
-      setOauthLoading(null);
-    }
+  function handleGitHubLogin() {
+    window.location.href = `${API_BASE_URL}/api/github/oauth/authorize`;
   }
 
-  async function handleGoogleLogin() {
-    setOauthLoading("google");
-    try {
-      const { authorization_url } = await api.getGoogleAuthUrl();
-      window.location.href = authorization_url;
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Google login failed");
-      setOauthLoading(null);
-    }
+  function handleGoogleLogin() {
+    window.location.href = `${API_BASE_URL}/api/google/oauth/authorize`;
   }
 
   return (
@@ -95,20 +80,18 @@ function LoginForm() {
               variant="outline"
               className="w-full"
               onClick={handleGitHubLogin}
-              disabled={oauthLoading !== null}
             >
               <Github className="mr-2 h-4 w-4" />
-              {oauthLoading === "github" ? "Connecting..." : "Continue with GitHub"}
+              Continue with GitHub
             </Button>
             <Button
               type="button"
               variant="outline"
               className="w-full"
               onClick={handleGoogleLogin}
-              disabled={oauthLoading !== null}
             >
               <Chrome className="mr-2 h-4 w-4" />
-              {oauthLoading === "google" ? "Connecting..." : "Continue with Google"}
+              Continue with Google
             </Button>
           </div>
 

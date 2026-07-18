@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
@@ -19,7 +20,7 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
 @router.get("/oauth/authorize")
 async def google_oauth_authorize(request: Request):
-    """Generate Google OAuth authorization URL."""
+    """Redirect to Google OAuth consent page."""
     if not settings.GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=500, detail="Google OAuth not configured")
     
@@ -35,7 +36,7 @@ async def google_oauth_authorize(request: Request):
         f"&access_type=offline"
     )
     
-    return {"authorization_url": auth_url}
+    return RedirectResponse(url=auth_url)
 
 
 @router.get("/oauth/callback")
